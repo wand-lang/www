@@ -1,0 +1,559 @@
+uses {FS.Read, IO, Shell(wand)}
+
+-- The standard library pages: the index, and one page per module.
+--
+-- What a module holds comes from `wand d`, so the pages say what the binary
+-- says. The manifest and the module's opening comment come from its file in
+-- stdlib/, and the guide from its section of the reference. The groups and
+-- the one-line descriptions are this site's own, in data/modules.toml.
+
+import Decode
+import FS
+import IO
+import JSON
+import List
+import Option
+import Par
+import Path
+import Regex
+import Result
+import String
+import TOML
+
+let HTML = import ./html
+let Highlight = import ./highlight
+let Markdown = import ./markdown
+let Manifest = import ./manifest
+let Sections = import ./sections
+let {Page} = import ./layout
+
+type Info(name: String, group: String, blurb: String)
+
+type Catalog(module: List Info)
+
+-- One name as `wand d --json` gives it.
+type Entry(name: String, ty "type": String)
+
+type Described(name: String, ty "type": String, doc: Option String)
+
+-- One function: its name with and without the module, its type, its doc,
+-- and the line of the stdlib file that defines it, where there is one.
+type Fn(name: String, short: String, ty: String, doc: String, line: Option Int)
+
+type Module(
+  name: String,
+  group: String,
+  blurb: String,
+  uses: List String,
+  intro: String,
+  guide: String,
+  fns: List Fn
+)
+
+let source_url = "https://github.com/wand-lang/wand/blob/main/stdlib"
+
+-- ── Reading ────────────────────────────────────────────────────────────
+
+let _comment? line = String.starts_with? "--" line
+
+let _uncomment line = Regex.replace r/^-- ?/ "" line
+
+-- The comment that opens a module, after its manifest and its imports and
+-- before its first definition. A comment directly above a `let` is that
+-- binding's doc, not the module's, so it counts only with a blank line
+-- under it.
+let intro lines =
+  let header? line =
+    String.trim line == ""
+    || String.starts_with? "uses " line
+    || String.starts_with? "import " line
+    || Regex.match? r/^let .*= import / line;
+  let rest = List.drop_while header? lines;
+  let block = List.take_while _comment? rest;
+  let after = List.drop (List.length block) rest;
+  let stands_alone =
+    match after with
+    | [] -> true
+    | [next :: _] -> String.trim next == ""
+  in
+  if stands_alone && block != [] then block |> List.map _uncomment |> String.join "\n"
+  else ""
+
+-- The line that defines a name, counting from one.
+let line_of short lines =
+  let defines? line =
+    line == "let " ++ short || String.starts_with? ("let " ++ short ++ " ") line;
+  lines
+  |> List.indexed
+  |> List.find (fn (_, l) -> defines? l)
+  |> Option.map (fn (i, _) -> i + 1)
+
+let _short module name = String.slice (String.length module + 1) (String.length name) name
+
+let _described! name =
+  match JSON.decode (Decode.list Described.decoder) (JSON.parse! $(wand d --json %{name})) with
+  | Ok [d :: _] -> d
+  | Ok [] -> Described(name = name, ty = "", doc = None)
+  | Error why -> (
+    IO.println_err "%{name}: %{why}";
+    Described(name = name, ty = "", doc = None)
+  )
+
+-- Every name in one module, with its doc. A doc costs a `wand d` of its
+-- own, so they are asked for eight at a time.
+let _fns! module lines =
+  let entries =
+    match JSON.decode (Decode.list Entry.decoder) (JSON.parse! $(wand d --json %{module})) with
+    | Ok es -> es
+    | Error why -> (IO.println_err "%{module}: %{why}"; [])
+  in
+  let fn_of result =
+    match result with
+    | Ok (Described(name, ty, doc)) -> (
+      let short = _short module name;
+      Some Fn(
+        name = name,
+        short = short,
+        ty = ty,
+        doc = Option.default "" doc,
+        line = line_of short lines
+      )
+    )
+    | Error why -> (IO.println_err "%{module}: %{why}"; None)
+  in
+  entries |> List.map (fn e -> e.name) |> Par.map 8 _described! |> List.filter_map fn_of
+
+-- Every module the binary carries, in the order and the groups the catalog
+-- gives, each with what its file and the reference say about it.
+let read! src reference = (
+  let catalog =
+    match TOML.decode Catalog.decoder (TOML.read_file! ./data/modules.toml) with
+    | Ok c -> c.module
+    | Error why -> (IO.println_err "data/modules.toml: %{why}"; [])
+  in
+  let present =
+    JSON.parse! $(wand d --json)
+    |> JSON.get_array
+    |> Result.default []
+    |> List.filter_map (fn j ->
+      JSON.field "name" j |> Result.and_then JSON.get_string |> Result.to_option);
+  let listed = List.map (fn i -> i.name) catalog;
+  let unlisted = present |> List.filter (fn n -> !(List.contains? n listed));
+  List.each
+    (fn n -> IO.println_err "data/modules.toml: no entry for %{n}; it goes under Other")
+    unlisted;
+  let infos =
+    (catalog |> List.filter (fn i -> List.contains? i.name present))
+    ++ List.map (fn n -> Info(name = n, group = "Other", blurb = "")) unlisted;
+  let library =
+    Sections.split 2 reference |> List.find (fn s -> s.title == "Current standard library");
+  let guides =
+    match library with
+    | Some s -> Sections.split 3 s.body
+    | None -> []
+  in
+  let guide_of name =
+    guides
+    |> List.find (fn s -> Sections.plain s.title == name)
+    |> Option.map (fn s -> s.body |> Sections.without_signatures |> Sections.promote 1)
+    |> Option.default "";
+  let module_of info =
+    let Info(name, group, blurb) = info;
+    let file = Path.join src (Path.of_string "stdlib/%{name}.wand");
+    let lines = if FS.file? file then String.lines (FS.read_file! file) else [];
+    Module(
+      name = name,
+      group = group,
+      blurb = blurb,
+      uses = Manifest.of_lines lines,
+      intro = intro lines,
+      guide = guide_of name,
+      fns = _fns! name lines
+    );
+  List.map module_of infos
+)
+
+-- ── Drawing ────────────────────────────────────────────────────────────
+
+let _sig_token =
+  r/'[a-z][a-z0-9_]*|\.\.|[A-Z][A-Za-z0-9_]*(\.[A-Z][A-Za-z0-9_]*)*|->|[(){}|,]|[^'.A-Z(){}|,-]+|./
+
+-- A type as HTML: types, type variables and punctuation each drawn apart.
+let type_html ty =
+  let piece token =
+    match token with
+    | _ if String.starts_with? "'" token || token == ".." -> `<span class="tv">%{HTML.escape token}</span>`
+    | _ if Regex.match? r/^[A-Z]/ token -> `<span class="ty">%{HTML.escape token}</span>`
+    | _ if Regex.match? r/^(->|[(){}|,])$/ token -> `<span class="pn">%{HTML.escape token}</span>`
+    | _ -> HTML.escape token
+  in
+  Regex.match_all _sig_token ty |> List.map piece |> String.join ""
+
+-- A signature's type and its effects, split at the last ` ! ` that is not
+-- inside a bracket: `('a -> Bool ! 'e) -> List 'a -> Bool ! 'e` has two.
+let split_effects ty = (
+  let step (depth, previous, at, index) byte =
+    let depth =
+      match byte with
+      | "(" | "{" | "[" -> depth + 1
+      | ")" | "}" | "]" -> depth - 1
+      | _ -> depth
+    in
+    let at = if byte == "!" && previous == " " && depth == 0 then Some index else at;
+    (depth, byte, at, index + 1);
+  let (_, _, at, _) = List.fold_left step (0, "", None, 0) (String.bytes ty);
+  match at with
+  | Some i -> (
+    String.trim (String.slice 0 i ty),
+    String.trim (String.slice (i + 1) (String.length ty) ty)
+  )
+  | None -> (ty, "")
+)
+
+-- An effect set as chips. `Raise` is drawn apart, because it is control
+-- flow and never part of a manifest, and a row variable is drawn as one.
+let effect_chips effects =
+  let inner = effects |> Regex.replace r/^\{/ "" |> Regex.replace r/\}$/ "";
+  let (named, row) =
+    match String.split "|" inner with
+    | [only] if String.starts_with? "'" (String.trim only) -> ("", String.trim only)
+    | [only] -> (only, "")
+    | [named, row] -> (named, "| " ++ String.trim row)
+    | _ -> (inner, "")
+  in
+  let chips = named |> Manifest.labels |> List.map Manifest.chip;
+  let row_chip =
+    if row == "" then [] else [`<span class="chip chip-row">%{HTML.escape row}</span>`];
+  `<span class="chips">%{String.join "" (chips ++ row_chip)}</span>`
+
+let _base short = Regex.replace r/!$/ "" short
+
+let _anchor short = "fn-" ++ _base short
+
+-- ── The index ──────────────────────────────────────────────────────────
+
+let _filters = ["All", "Pure", "FS.Read", "FS.Write", "Net", "Shell", "Clock"]
+
+let _card m =
+  let Module(name, blurb, uses) = m;
+  let effects = uses |> List.map (fn u -> Regex.replace r/\(.*$/ "" u) |> String.join " ";
+  `<a class="card mod-card" href="%{name}/" data-effects="%{effects}">
+<span class="mod-name">%{name}</span>
+<span class="mod-desc">%{HTML.escape blurb}</span>
+<span class="chips">%{Manifest.chips uses}</span>
+</a>`
+
+-- The groups, in the order their first module comes in.
+let groups modules =
+  let names = modules |> List.map (fn (m: Module) -> m.group) |> List.unique;
+  names |> List.map (fn g -> (g, List.filter (fn (m: Module) -> m.group == g) modules))
+
+let _group (name, members) =
+  let count = List.length members;
+  let noun = if count == 1 then "module" else "modules";
+  let cards = members |> List.map _card |> String.join "\n";
+  `
+<section class="group" data-group>
+<div class="group-head"><h2>%{HTML.escape name}</h2><span class="group-count">%{count} %{noun}</span></div>
+<div class="grid">
+%{cards}
+</div>
+</section>`
+
+let search_box id label placeholder = `<label for="%{id}">%{label}</label>
+<div class="search">
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+<input id="%{id}" type="search" placeholder="%{placeholder}" autocomplete="off" data-search role="combobox" aria-expanded="false" aria-controls="%{id}-results" aria-autocomplete="list">
+<kbd aria-hidden="true">/</kbd>
+<ul class="search-results" id="%{id}-results" role="listbox" hidden></ul>
+</div>`
+
+-- The index of every module. `collections` is the reference's section on
+-- List, String and Stream, which is about the library as a whole.
+let index_page modules collections link =
+  let pills =
+    _filters
+    |> List.map (fn filter ->
+      `<button type="button" class="pill pill-mono" data-filter="%{filter}" aria-pressed="%{if filter == "All" then "true" else "false"}">%{filter}</button>`)
+    |> String.join "\n";
+  let sections = modules |> groups |> List.map _group |> String.join "\n";
+  let compare = Markdown.render link collections;
+  let count = List.length modules;
+  let body = `
+<div class="wrap page">
+<div class="page-head">
+<div class="page-head-text">
+<span class="eyebrow">%{count} modules · wand d</span>
+<h1 class="title">Standard library</h1>
+<p class="lead">Each module opens with a manifest, the same as your scripts, so you can see what it may touch before you import it. A module with no manifest is pure.</p>
+</div>
+<div class="page-head-tool">
+%{search_box "fn-search" "Find a function" "List.map, read_file, Duration…"}
+</div>
+</div>
+<div class="pills" role="group" aria-label="Filter by effect" data-filters="effects">
+<span class="filter-label">Show modules that perform</span>
+%{pills}
+</div>
+%{sections}
+<p class="empty" hidden data-empty>No module performs that effect.</p>
+<section class="card compare prose" aria-labelledby="three-collections-and-where-they-differ">
+<h2 id="three-collections-and-where-they-differ">Three collections, and where they differ</h2>
+%{compare}
+</section>
+</div>`;
+  Page(
+    title = "Standard library",
+    description = "The modules wand carries, with what each one may touch.",
+    path = "stdlib/",
+    section = "stdlib",
+    body = body
+  )
+
+-- ── A module ───────────────────────────────────────────────────────────
+
+-- A doc as its prose and its examples. An example starts with `>>`, goes
+-- on with `..`, and the lines after it are what it produces.
+type Example(code: List String, result: String)
+
+let _example? block =
+  match String.lines block with
+  | [first :: _] -> String.starts_with? ">>" first
+  | [] -> false
+
+let _example block =
+  let lines = String.lines block;
+  let code? l = String.starts_with? ">>" l || String.starts_with? ".." l;
+  let code = List.take_while code? lines;
+  let result = lines |> List.drop (List.length code) |> String.join "\n";
+  Example(code, result)
+
+let _paragraphs doc =
+  doc |> Regex.split r/\n\s*\n/ |> List.filter (fn b -> String.trim b != "")
+
+let _example_html label example =
+  let Example(code, result) = example;
+  let line l =
+    let prompt = String.slice 0 2 l;
+    let rest = String.slice 2 (String.length l) l;
+    `<span class="p">%{prompt}</span>%{Highlight.code rest}`;
+  let shown = code |> List.map line |> String.join "\n";
+  let result_html =
+    match Regex.capture r/^(.*) : ([^:]*)$/ result with
+    | Some [_, value, ty] -> `%{HTML.escape value}<span class="p"> : </span><span class="t">%{HTML.escape ty}</span>`
+    | _ -> HTML.escape result
+  in
+  let ending = if result == "" then "" else `<span class="result">%{result_html}</span>`;
+  `
+<div class="codebox example">
+<div class="codebox-bar"><span>%{HTML.escape label}</span><button type="button" class="copy" data-copy>Copy</button></div>
+<pre><code>%{shown}%{ending}</code></pre>
+</div>`
+
+let _sig_line f =
+  let Fn(short, ty) = f;
+  let (shape, effects) = split_effects ty;
+  let chips = if effects == "" then "" else effect_chips effects;
+  `<div class="fn-sig"><span class="name">%{HTML.escape short}</span><span class="pn">:</span><span class="sig">%{type_html shape}</span>%{chips}</div>`
+
+-- One function and its `!` sibling, documented together: both signatures,
+-- the plain one's prose and any the sibling adds, and both sets of
+-- examples.
+let _article module link (base, members) =
+  let blocks (f: Fn) = _paragraphs f.doc;
+  let prose (f: Fn) = blocks f |> List.filter (fn b -> !(_example? b));
+  let examples (f: Fn) =
+    blocks f
+    |> List.filter _example?
+    |> List.map (fn b -> _example_html f.short (_example b));
+  let first_prose =
+    match members with
+    | [first :: _] -> prose first
+    | [] -> []
+  in
+  let extra =
+    members
+    |> List.drop 1
+    |> List.flat_map (fn (f: Fn) -> prose f |> List.drop 1)
+    |> List.filter (fn b -> !(List.contains? b first_prose));
+  let doc = Markdown.render link (String.join "\n\n" (first_prose ++ extra));
+  let shown = members |> List.flat_map examples |> String.join "\n";
+  let sigs = members |> List.map _sig_line |> String.join "\n";
+  let line = members |> List.filter_map (fn (f: Fn) -> f.line) |> List.head;
+  let source =
+    match line with
+    | Some n -> `<a class="src" href="%{source_url}/%{module}.wand#L%{n}">%{module}.wand:%{n}</a>`
+    | None -> ""
+  in
+  let example_part =
+    if shown == "" then ""
+    else "<div class=\"examples\"><span class=\"label\">Examples</span>\n%{shown}</div>";
+  `<article class="fn" id="fn-%{base}" aria-labelledby="h-%{base}">
+<div class="fn-head">
+<h3 id="h-%{base}">%{HTML.escape base}</h3>
+<span class="fn-links"><a class="up" href="#signatures">↑ Signatures</a>%{source}</span>
+</div>
+<div class="fn-sigs">
+%{sigs}
+</div>
+<div class="doc">%{doc}</div>
+%{example_part}
+</article>`
+
+-- A module's functions by their base name, each base once, in the order
+-- the file defines them; a name with no line in the file goes last.
+let by_base fns =
+  let sorted = List.sort_by (fn (f: Fn) -> Option.default 1000000 f.line) fns;
+  let bases = sorted |> List.map (fn (f: Fn) -> _base f.short) |> List.unique;
+  let members b =
+    let plain = List.filter (fn (f: Fn) -> f.short != b ++ "!" && _base f.short == b) fns;
+    let bang = List.filter (fn (f: Fn) -> f.short == b ++ "!") fns;
+    plain ++ bang;
+  List.map (fn b -> (b, members b)) bases
+
+let _sig_row f =
+  let Fn(short, ty) = f;
+  let (shape, effects) = split_effects ty;
+  let chips = if effects == "" then "" else effect_chips effects;
+  `<div class="sig-row"><a href="#%{_anchor short}">%{HTML.escape short}</a><span class="sig">%{type_html shape}</span>%{chips}</div>`
+
+-- The signature list. A module with `!` names shows the plain ones and the
+-- raising ones as two tabs, which is the choice a reader makes first.
+let _signatures fns = (
+  let rows fs = fs |> List.map _sig_row |> String.join "\n";
+  let raising = List.filter (fn (f: Fn) -> String.ends_with? "!" f.short) fns;
+  let plain = List.filter (fn (f: Fn) -> !(String.ends_with? "!" f.short)) fns;
+  match raising with
+  | [] -> "<div class=\"sig-list\">\n%{rows fns}\n</div>"
+  | _ -> (
+    let p = List.length plain;
+    let r = List.length raising;
+    `
+<div class="sig-tabs" role="tablist" aria-label="Signature form" data-tabs>
+<button type="button" role="tab" id="tab-plain" aria-controls="sigs-plain" aria-selected="true">Returns a value · %{p}</button>
+<button type="button" role="tab" id="tab-raise" aria-controls="sigs-raise" aria-selected="false" tabindex="-1">Raises ! · %{r}</button>
+</div>
+<div class="sig-list" id="sigs-plain" role="tabpanel" aria-labelledby="tab-plain">
+%{rows plain}
+</div>
+<div class="sig-list" id="sigs-raise" role="tabpanel" aria-labelledby="tab-raise" hidden>
+%{rows raising}
+</div>`
+  )
+)
+
+let _sidebar modules current =
+  let link (m: Module) =
+    let here = if m.name == current then ` aria-current="page"` else "";
+    `<a class="mono" href="../%{m.name}/"%{here}>%{m.name}</a>`;
+  let group (name, members) =
+    "<div class=\"side-group\"><span class=\"group-label\">%{HTML.escape name}</span>\n%{members |> List.map link |> String.join "\n"}</div>";
+  let all = modules |> groups |> List.map group |> String.join "\n";
+  `
+<aside class="docs-side" aria-label="Modules">
+<details open data-collapsible>
+<summary class="side-toggle">Modules</summary>
+<div class="side-groups">
+%{all}
+</div>
+</details>
+</aside>`
+
+let _pager (before: Option Module) (after: Option Module) =
+  let prev =
+    match before with
+    | Some m -> "<a href=\"../%{m.name}/\"><span>Previous</span><span>← %{m.name}</span></a>"
+    | None -> ""
+  in
+  let next =
+    match after with
+    | Some m -> "<a class=\"next\" href=\"../%{m.name}/\"><span>Next</span><span>%{m.name} →</span></a>"
+    | None -> ""
+  in
+  `<nav class="pager mono" aria-label="Next and previous">%{prev}%{next}</nav>`
+
+-- One module's page. `link` points the guide's links at their pages.
+let module_page modules link (before, m, after) =
+  let Module(name, group, blurb, uses, intro, guide, fns) = m;
+  let articles = fns |> by_base |> List.map (_article name link) |> String.join "\n";
+  let lead =
+    if intro != "" then Markdown.render link intro else "<p>%{HTML.escape blurb}</p>";
+  let guide_part =
+    if guide == "" then ""
+    else "<section id=\"guide\" class=\"guide prose\" aria-labelledby=\"guide-h\"><h2 id=\"guide-h\" class=\"h2\">Guide</h2>\n%{Markdown.render link guide}</section>";
+  let guide_toc = if guide == "" then "" else `<a href="#guide">Guide</a>`;
+  let fn_toc =
+    fns
+    |> by_base
+    |> List.map (fn (b, _) -> `<a class="sub" href="#fn-%{b}">%{HTML.escape b}</a>`)
+    |> String.join "\n";
+  let first = fns |> List.map (fn (f: Fn) -> f.name) |> List.head |> Option.default name;
+  let body = `
+<div class="wrap-wide docs">
+%{_sidebar modules name}
+<div class="docs-main">
+<div class="doc-head">
+<nav class="crumbs" aria-label="Breadcrumb"><span><a href="../">Standard library</a><span aria-hidden="true">/</span><span>%{HTML.escape group}</span></span></nav>
+<div class="doc-head-row">
+<h1 class="title-mono">%{name}</h1>
+<a href="%{source_url}/%{name}.wand">stdlib/%{name}.wand</a>
+</div>
+<div class="manifest"><span>uses</span>%{Manifest.chips uses}</div>
+<div class="lead doc">%{lead}</div>
+</div>
+<section id="signatures" aria-labelledby="sig-h" class="doc-head">
+<div class="doc-head-row"><h2 id="sig-h" class="h2">Signatures</h2></div>
+%{_signatures fns}
+<p class="small">Each name jumps to its documentation below. <span class="chip chip-quiet">Raise</span> is drawn apart: it is control flow, and never part of a manifest.</p>
+</section>
+%{guide_part}
+<section id="functions" aria-labelledby="fn-h">
+<h2 id="fn-h" class="h2">Functions</h2>
+%{articles}
+</section>
+%{_pager before after}
+</div>
+<aside class="docs-toc" aria-label="On this page">
+<span class="group-label toc-label">On this page</span>
+<nav>
+<a href="#signatures">Signatures</a>
+%{guide_toc}
+<a href="#functions">Functions</a>
+%{fn_toc}
+</nav>
+<div class="terminal-card"><span>In your terminal</span><code>wand d %{first}</code></div>
+</aside>
+</div>`;
+  Page(
+    title = name,
+    description = "%{name}: %{blurb}",
+    path = "stdlib/%{name}/",
+    section = "stdlib",
+    body = body
+  )
+
+-- Each module with the ones before and after it, for the pager.
+let neighbours modules =
+  let arr = List.indexed modules;
+  let at i = List.get i modules;
+  List.map (fn (i, m) -> (at (i - 1), m, at (i + 1))) arr
+
+-- Every stdlib page. `linker` gives, for the path of a page, how that page
+-- writes the reference's links.
+let pages modules collections linker =
+  index_page modules collections (linker "stdlib/") :: List.map
+    (fn (before, m, after) -> module_page modules (linker "stdlib/%{m.name}/") (
+      before,
+      m,
+      after
+    ))
+    (neighbours modules)
+
+-- What the site's search finds in the library: every name, and where its
+-- documentation is.
+let search_entries modules =
+  modules
+  |> List.flat_map (fn (m: Module) ->
+    ("%{m.name}", "stdlib/%{m.name}/", "module") :: List.map
+      (fn (f: Fn) -> (f.name, "stdlib/%{m.name}/#%{_anchor f.short}", "function"))
+      m.fns)

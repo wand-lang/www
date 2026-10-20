@@ -1,0 +1,262 @@
+uses {FS.Read, IO}
+
+-- The language reference: docs/reference.md, one page per `##` section.
+--
+-- The reference links to its own headings, `#manifests`, as one file does.
+-- On the site those headings are on many pages, so every heading's anchor
+-- is mapped to the page that holds it, and each link is pointed there. The
+-- standard library's section is not here: its modules have pages of their
+-- own, and its anchors point at those.
+
+import IO
+import List
+import Map
+import Option
+import Regex
+import String
+import TOML
+
+let HTML = import ./html
+let Markdown = import ./markdown
+let Sections = import ./sections
+let {Page} = import ./layout
+
+type Group(name: String, sections: List String)
+
+type Sidebar(group: List Group)
+
+let repo = "https://github.com/wand-lang/wand"
+
+-- Sections that are not pages: the contents list, which the sidebar
+-- replaces, and the library, which has pages of its own.
+let _contents = "Contents"
+
+let _library = "Current standard library"
+
+let _module_title? title = Regex.match? r/^`[A-Z][A-Za-z0-9]*`$/ title
+
+-- Every heading in the reference, by its anchor, with the page it is on.
+-- The first heading with an anchor keeps it, as on GitHub.
+let anchors reference =
+  let add map (anchor, target) =
+    if Map.has? anchor map then map else Map.set anchor target map;
+  let below page body =
+    body
+    |> Sections.headings
+    |> List.map (fn (_, t) -> (HTML.slug t, "%{page}#%{HTML.slug t}"));
+  let module_pairs (s: Sections.Section) =
+    if _module_title? s.title then (
+      let page = "stdlib/%{Sections.plain s.title}/";
+      (s.id, page) :: below page s.body
+    )
+    else (s.id, "stdlib/#%{s.id}") :: below "stdlib/" s.body;
+  let pairs (s: Sections.Section) =
+    match s.title with
+    | t if t == _contents -> []
+    | t if t == _library -> (s.id, "stdlib/") :: List.flat_map module_pairs (Sections.split 3 s.body)
+    | _ -> (let page = "reference/%{s.id}/"; (s.id, page) :: below page s.body)
+  in
+  reference |> Sections.split 2 |> List.flat_map pairs |> List.fold_left add Map.empty
+
+-- How a page at `path` writes a link the reference wrote. An anchor goes to
+-- the page that holds it, and a link to another file in the repository goes
+-- to that file on GitHub.
+let linker anchors path = (
+  let up =
+    path
+    |> String.split "/"
+    |> List.filter (fn s -> s != "")
+    |> List.map (fn _ -> "../")
+    |> String.join "";
+  fn href -> match href with
+    | _ if String.starts_with? "#" href -> (
+      match Map.get (String.slice 1 (String.length href) href) anchors with
+      | Some target if String.starts_with? (path ++ "#") target ->
+        String.slice (String.length path) (String.length target) target
+      | Some target -> up ++ target
+      | None -> href
+    )
+    | _ if Regex.match? r/^[a-z]+:/ href -> href
+    | _ if String.starts_with? "../" href -> "%{repo}/blob/main/%{String.slice 3 (String.length href) href}"
+    | _ -> "%{repo}/blob/main/docs/%{href}"
+)
+
+-- The sidebar's groups, from data/reference.toml, with every page the file
+-- does not name added under "More".
+let sidebar! pages = (
+  let groups =
+    match TOML.decode Sidebar.decoder (TOML.read_file! ./data/reference.toml) with
+    | Ok s -> s.group
+    | Error why -> (IO.println_err "data/reference.toml: %{why}"; [])
+  in
+  let titles = List.map (fn (s: Sections.Section) -> s.title) pages;
+  let named = List.flat_map (fn (g: Group) -> g.sections) groups;
+  List.each
+    (fn n -> IO.println_err "data/reference.toml: no section '%{n}' in the reference")
+    (List.filter (fn n -> !(List.contains? n titles)) named);
+  let more = List.filter (fn t -> !(List.contains? t named)) titles;
+  List.each
+    (fn t -> IO.println_err "data/reference.toml: '%{t}' is in no group; it goes under More")
+    more;
+  let kept =
+    List.map
+      (fn (g: Group) -> Group(
+        name = g.name,
+        sections = List.filter (fn t -> List.contains? t titles) g.sections
+      ))
+      groups;
+  if more == [] then kept else kept ++ [Group(name = "More", sections = more)]
+)
+
+-- The sections that are pages, in the sidebar's order.
+let _ordered groups pages =
+  groups
+  |> List.flat_map (fn (g: Group) -> List.map (fn t -> (g.name, t)) g.sections)
+  |> List.filter_map (fn (group, t) ->
+    pages
+    |> List.find (fn (s: Sections.Section) -> s.title == t)
+    |> Option.map (fn s -> (group, s)))
+
+let _side groups current =
+  let link title =
+    let id = HTML.slug title;
+    let here = if title == current then ` aria-current="page"` else "";
+    `<a href="../%{id}/"%{here}>%{Markdown.inline (fn h -> h) title}</a>`;
+  let group (g: Group) =
+    "<div class=\"side-group\"><span class=\"group-label\">%{HTML.escape g.name}</span>\n%{g.sections |> List.map link |> String.join "\n"}</div>";
+  `
+<aside class="docs-side" aria-label="Reference sections">
+<div class="side-search">
+<label for="ref-search" class="visually-hidden">Search the reference</label>
+<div class="search">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+<input id="ref-search" type="search" placeholder="handle, uses, Shell…" autocomplete="off" data-search role="combobox" aria-expanded="false" aria-controls="ref-search-results" aria-autocomplete="list">
+<ul class="search-results" id="ref-search-results" role="listbox" hidden></ul>
+</div>
+</div>
+<details open data-collapsible>
+<summary class="side-toggle">Sections</summary>
+<div class="side-groups">
+%{groups |> List.map group |> String.join "\n"}
+<a class="side-more" href="../../stdlib/">Standard library →</a>
+</div>
+</details>
+</aside>`
+
+let _pager (before: Option (String, Sections.Section)) (after: Option (String, Sections.Section)) =
+  let one cls label (item: Option (String, Sections.Section)) =
+    match item with
+    | Some (_, s) -> `<a class="%{cls}" href="../%{s.id}/"><span>%{label}</span><span>%{Markdown.inline (fn h -> h) s.title}</span></a>`
+    | None -> ""
+  in
+  `<nav class="pager" aria-label="Next and previous">%{one "prev" "Previous" before}%{one "next" "Next" after}</nav>`
+
+-- One section's page.
+let _page anchors groups (before, (group, section), after) =
+  let Sections.Section(title, id, body) = section;
+  let path = "reference/%{id}/";
+  let link = linker anchors path;
+  let toc =
+    body
+    |> Sections.headings
+    |> List.filter (fn (level, _) -> level == 3)
+    |> List.map (fn (_, t) -> `<a href="#%{HTML.slug t}">%{Markdown.inline link t}</a>`)
+    |> String.join "\n";
+  let toc_part =
+    if toc == "" then ""
+    else "<aside class=\"docs-toc\" aria-label=\"On this page\"><span class=\"group-label toc-label\">On this page</span><nav>\n%{toc}\n</nav></aside>";
+  let page_body = `
+<div class="wrap-wide docs">
+%{_side groups title}
+<article class="docs-main narrow">
+<div class="doc-head">
+<nav class="crumbs" aria-label="Breadcrumb"><span><a href="../">Reference</a><span aria-hidden="true">/</span><span>%{HTML.escape group}</span></span><a class="edit" href="%{repo}/blob/main/docs/reference.md#%{id}">Edit on GitHub</a></nav>
+<h1 class="title">%{Markdown.inline link title}</h1>
+</div>
+<div class="prose">
+%{Markdown.render link (Sections.promote 1 body)}
+</div>
+%{_pager before after}
+</article>
+%{toc_part}
+</div>`;
+  Page(
+    title = Sections.plain title,
+    description = "The wand language reference: %{Sections.plain title}.",
+    path = path,
+    section = "reference",
+    body = page_body
+  )
+
+-- The reference's front page: what it covers, and every section by group.
+let _index anchors groups (ordered: List (String, Sections.Section)) intro =
+  let link = linker anchors "reference/";
+  let card (g: Group) =
+    let items =
+      g.sections
+      |> List.map (fn t -> `<li><a href="%{HTML.slug t}/">%{Markdown.inline link t}</a></li>`)
+      |> String.join "\n";
+    "<section class=\"card\"><h2 class=\"group-label\">%{HTML.escape g.name}</h2><ul class=\"ref-list\">\n%{items}\n</ul></section>";
+  let first =
+    match ordered with
+    | [(_, s) :: _] -> "<a class=\"btn btn-primary\" href=\"%{s.id}/\">Start with %{Sections.plain s.title} →</a>"
+    | [] -> ""
+  in
+  let body = `
+<div class="wrap page">
+<div class="page-head-text">
+<span class="eyebrow">docs/reference.md</span>
+<h1 class="title">Language reference</h1>
+<div class="lead">%{Markdown.render link intro}</div>
+<div class="actions">%{first}<a class="btn btn-secondary" href="../stdlib/">Standard library</a></div>
+</div>
+<div class="grid ref-groups">
+%{groups |> List.map card |> String.join "\n"}
+</div>
+</div>`;
+  Page(
+    title = "Reference",
+    description = "The complete wand language: syntax, types, the standard library, and the tools.",
+    path = "reference/",
+    section = "reference",
+    body = body
+  )
+
+-- Every reference page.
+let pages! anchors reference =
+  let pages =
+    reference
+    |> Sections.split 2
+    |> List.filter (fn (s: Sections.Section) -> s.title != _contents && s.title != _library);
+  let groups = sidebar! pages;
+  let ordered = _ordered groups pages;
+  let at i = List.get i ordered;
+  let intro =
+    reference
+    |> Sections.preamble 2
+    |> String.lines
+    |> List.filter (fn l -> !(String.starts_with? "# " l) && l != "---")
+    |> String.join "\n";
+  let each =
+    ordered
+    |> List.indexed
+    |> List.map (fn (i, item) -> _page anchors groups (at (i - 1), item, at (i + 1)));
+  _index anchors groups ordered intro :: each
+
+-- What the site's search finds in the reference: each page, and each
+-- heading on it.
+let search_entries reference =
+  let pages =
+    reference
+    |> Sections.split 2
+    |> List.filter (fn (s: Sections.Section) -> s.title != _contents && s.title != _library);
+  pages
+  |> List.flat_map (fn (s: Sections.Section) ->
+    let page = "reference/%{s.id}/";
+    (Sections.plain s.title, page, "reference") :: (s.body
+    |> Sections.headings
+    |> List.map (fn (_, t) -> (
+      Sections.plain t,
+      "%{page}#%{HTML.slug t}",
+      Sections.plain s.title
+    ))))

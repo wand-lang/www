@@ -1,0 +1,219 @@
+# The standard library pages: each module's group, and the line its card
+# shows. The order here is the order on the page. A module that `wand d`
+# lists and this file does not is still built, under "Other", and the
+# build says so.
+
+[[module]]
+name = "List"
+group = "Collections and text"
+blurb = "In memory and finite: the one you can sort, and read twice without paying twice."
+
+[[module]]
+name = "String"
+group = "Collections and text"
+blurb = "Measured in bytes, not characters. Slices between two indices."
+
+[[module]]
+name = "Stream"
+group = "Collections and text"
+blurb = "Reading through, without reading in. Read once, and may not end."
+
+[[module]]
+name = "Map"
+group = "Collections and text"
+blurb = "Keeps its entries in the order they were first added, not key order."
+
+[[module]]
+name = "Regex"
+group = "Collections and text"
+blurb = "Compile a pattern, then match, find and replace with it."
+
+[[module]]
+name = "FS"
+group = "Files and processes"
+blurb = "Read, write and publish files. Each fallible operation has a ! sibling."
+
+[[module]]
+name = "Path"
+group = "Files and processes"
+blurb = "Join two path segments, and take a path apart."
+
+[[module]]
+name = "Glob"
+group = "Files and processes"
+blurb = "Matching a path against a pattern, without reading the disk to do it."
+
+[[module]]
+name = "Shell"
+group = "Files and processes"
+blurb = "Run a Command built with $*(), or query it for a result to examine."
+
+[[module]]
+name = "IO"
+group = "Files and processes"
+blurb = "Printing to the terminal."
+
+[[module]]
+name = "Env"
+group = "Files and processes"
+blurb = "Environment variables, as an Option rather than an empty string."
+
+[[module]]
+name = "Proc"
+group = "Files and processes"
+blurb = "The running program itself: what it was started with, and how it ends."
+
+[[module]]
+name = "Args"
+group = "Files and processes"
+blurb = "Read a command line into a typed value, with help text."
+
+[[module]]
+name = "Resource"
+group = "Files and processes"
+blurb = "Things that must be given back: how to acquire, and how to release."
+
+[[module]]
+name = "HTTP"
+group = "Network"
+blurb = "Requests out, and serving in."
+
+[[module]]
+name = "Net"
+group = "Network"
+blurb = "Listening on a port, and reading and writing the connections it accepts."
+
+[[module]]
+name = "URL"
+group = "Network"
+blurb = "Reading a URL, and building one from another."
+
+[[module]]
+name = "IPv4"
+group = "Network"
+blurb = "Reading an address."
+
+[[module]]
+name = "CIDR"
+group = "Network"
+blurb = "Reading a network, and asking what is in it."
+
+[[module]]
+name = "Port"
+group = "Network"
+blurb = "A port number, with and without the colon."
+
+[[module]]
+name = "Decode"
+group = "Data formats"
+blurb = "Reading data that arrived untyped. A decoder is a value you can name and pass."
+
+[[module]]
+name = "JSON"
+group = "Data formats"
+blurb = "Parse and write JSON."
+
+[[module]]
+name = "TOML"
+group = "Data formats"
+blurb = "Parse and write TOML."
+
+[[module]]
+name = "YAML"
+group = "Data formats"
+blurb = "Parse and write YAML."
+
+[[module]]
+name = "CSV"
+group = "Data formats"
+blurb = "Rows in, rows out."
+
+[[module]]
+name = "Base64"
+group = "Data formats"
+blurb = "Base64, both alphabets."
+
+[[module]]
+name = "Hash"
+group = "Data formats"
+blurb = "Hash a string, or a file."
+
+[[module]]
+name = "Digest"
+group = "Data formats"
+blurb = "A digest, and the algorithm that made it."
+
+[[module]]
+name = "Int"
+group = "Values and time"
+blurb = "The Int operations that are not operators."
+
+[[module]]
+name = "Float"
+group = "Values and time"
+blurb = "Crossing between the two members of Num."
+
+[[module]]
+name = "Bool"
+group = "Values and time"
+blurb = "Reading a Bool from text, and writing one as text."
+
+[[module]]
+name = "Option"
+group = "Values and time"
+blurb = "A value that may be absent."
+
+[[module]]
+name = "Result"
+group = "Values and time"
+blurb = "What a fallible operation answered."
+
+[[module]]
+name = "Duration"
+group = "Values and time"
+blurb = "Durations, written as 30s or 5min."
+
+[[module]]
+name = "Size"
+group = "Values and time"
+blurb = "Sizes, written as 100MB. The size in bytes as an integer."
+
+[[module]]
+name = "Version"
+group = "Values and time"
+blurb = "Reading a version, and stepping to the next one."
+
+[[module]]
+name = "DateTime"
+group = "Values and time"
+blurb = "Taking an instant apart, and building one."
+
+[[module]]
+name = "Clock"
+group = "Values and time"
+blurb = "Waiting, and reading the current instant."
+
+[[module]]
+name = "Random"
+group = "Values and time"
+blurb = "Seeded random numbers."
+
+[[module]]
+name = "Par"
+group = "Concurrency"
+blurb = "Fork-join parallelism, and nothing else."
+
+[[module]]
+name = "Shared"
+group = "Concurrency"
+blurb = "One piece of state, shared between fibers."
+
+[[module]]
+name = "Test"
+group = "Tools"
+blurb = "Tests, groups, and handlers for the outside world."
+
+[[module]]
+name = "Wand"
+group = "Tools"
+blurb = "Format and check wand source from wand."

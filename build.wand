@@ -1,0 +1,138 @@
+uses {FS.Read, FS.Write, IO, Proc, Shell(wand)}
+
+-- Build wand-lang.org from a checkout of the wand repository.
+--
+--   wand build.wand --src ../wand --out _site
+--
+-- Every page is generated from the repository: the reference from
+-- docs/reference.md, the library from `wand d` and stdlib/, the examples
+-- from examples/. The binary on PATH answers the `wand d` questions, so it
+-- has to be the one the checkout builds -- the build refuses a checkout and
+-- a binary whose versions differ, since the pages would then describe one
+-- and document the other.
+
+import Args
+import FS
+import IO
+import JSON
+import List
+import Map
+import Option
+import Path
+import Proc
+import Result
+import String
+
+let Examples = import ./lib/examples
+let Home = import ./lib/home
+let Layout = import ./lib/layout
+let Reference = import ./lib/reference
+let Sections = import ./lib/sections
+let Stdlib = import ./lib/stdlib
+
+type Options(src: Option Path, out: Option Path)
+
+let fail message = (IO.println_err "build: %{message}"; Proc.exit 1)
+
+let options () =
+  match Args.parse Options.decoder (Proc.args ()) with
+  | Ok o -> (Option.default ../wand o.src, Option.default ./_site o.out)
+  | Error why -> fail why
+
+-- A check the build cannot pass. It raises rather than exits, so serve.wand
+-- can report a failed rebuild and go on serving the last good one.
+let refuse! message = Result.get! (Error "build: %{message}")
+
+-- The checkout's version, and the binary's, which must agree.
+let version! src = (
+  let file = Path.join src ./VERSION;
+  if !(FS.file? file) then
+    refuse! "%{Path.to_string src} has no VERSION; pass --src <a wand checkout>";
+  let wanted = String.trim (FS.read_file! file);
+  let running = String.trim (String.replace "wand" "" $(wand v));
+  if wanted != running then
+    refuse! "the checkout is %{wanted} and the wand on PATH is %{running}";
+  wanted
+)
+
+-- The home page's code must typecheck, since the page says it does.
+let check_snippets! () =
+  with FS.temp_dir "www_" as dir -> (
+    let check (name, code) = (
+      let file = Path.join dir (Path.of_string name);
+      FS.write_file! file code;
+      let r = $?(wand t %{file});
+      if r.code != 0 then refuse! "the home page's %{name} does not typecheck:\n%{r.stderr}"
+    );
+    List.each check Home.checked
+  )
+
+let write_page! out version (page: Layout.Page) = (
+  let dir = Path.join out (Path.of_string page.path);
+  FS.mkdir! dir;
+  FS.write_file! (Path.join dir ./index.html) (Layout.render version page)
+)
+
+let search_json entries =
+  let entry (title, url, kind) =
+    JSON.of_map
+      (Map.from_list [
+        ("t", JSON.of_string title),
+        ("u", JSON.of_string url),
+        ("k", JSON.of_string kind)
+      ]);
+  JSON.stringify (JSON.of_list (List.map entry entries))
+
+let not_found =
+  Layout.Page(
+    title = "Not found",
+    description = "There is no page here.",
+    path = "",
+    section = "",
+    body = `<div class="wrap page"><div class="page-head-text"><span class="eyebrow">404</span><h1 class="title">There is no page here.</h1><p class="lead">It may have moved when the reference did. The <a href="/reference/">reference</a> and the <a href="/stdlib/">standard library</a> start from the top.</p></div></div>`
+  )
+
+-- Build the site from the checkout at `src` into `out`, replacing what is
+-- there. serve.wand calls this before it serves.
+let build! src out = (
+  let version = version! src;
+  check_snippets! ();
+  let reference = FS.read_file! (Path.join src ./docs/reference.md);
+  let anchors = Reference.anchors reference;
+  let modules = Stdlib.read! src reference;
+  let collections =
+    Sections.split 2 reference
+    |> List.find (fn (s: Sections.Section) -> s.title == "Current standard library")
+    |> Option.map (fn (s: Sections.Section) -> Sections.split 3 s.body)
+    |> Option.default []
+    |> List.find (fn (s: Sections.Section) -> String.starts_with? "Three collections" s.title)
+    |> Option.map (fn (s: Sections.Section) -> s.body)
+    |> Option.default "";
+  let plan = Examples.plan! ();
+  let ports = Examples.ports! src plan;
+  let promo =
+    match List.find (fn (p: Examples.Ported) -> p.name == plan.featured) ports with
+    | Some p -> Home.excerpt p.source (List.head p.bash |> Option.default "")
+    | None -> ""
+  in
+  let pages =
+    [Home.page (Home.session! ()) (List.length ports) promo, Examples.page plan ports]
+    ++ Stdlib.pages modules collections (Reference.linker anchors)
+    ++ Reference.pages! anchors reference;
+  if FS.dir? out then FS.delete_tree! out;
+  FS.mkdir! out;
+  List.each (write_page! out version) pages;
+  FS.copy_tree! ./assets (Path.join out ./assets);
+  -- GitHub Pages serves this for a path at any depth, so its links start
+  -- from the top of the site rather than from where it is.
+  FS.write_file! (Path.join out ./404.html) (Layout.render_from "/" version not_found);
+  let entries = Stdlib.search_entries modules ++ Reference.search_entries reference;
+  FS.write_file! (Path.join out ./assets/search.json) (search_json entries);
+  IO.println "built %{List.length pages} pages for wand %{version} in %{Path.to_string out}"
+)
+
+let main! () =
+  let (src, out) = options ();
+  build! src out
+
+main! ()

@@ -1,0 +1,46 @@
+import String
+
+let {test} = import Test
+
+let Manifest = import ../lib/manifest
+let Stdlib = import ../lib/stdlib
+
+test "a uses line splits at the commas between labels" (fn t ->
+  t.eq
+    ["IO", "Net(a.com, b.com)", "Shell(git)"]
+    (Manifest.of_lines ["uses {IO, Net(a.com, b.com), Shell(git)}"]))
+
+test "a file with no manifest declares nothing" (fn t ->
+  t.eq [] (Manifest.of_lines ["import IO"]))
+
+test "the effects are the last ! outside a bracket" (fn t ->
+  t.eq
+    ("('a -> Bool ! 'e) -> List 'a -> Bool", "'e")
+    (Stdlib.split_effects "('a -> Bool ! 'e) -> List 'a -> Bool ! 'e"))
+
+test "a pure type has no effects" (fn t ->
+  t.eq ("List 'a -> Int", "") (Stdlib.split_effects "List 'a -> Int"))
+
+test "Raise is drawn apart, and a row is drawn as one" (fn t ->
+  let html = Stdlib.effect_chips "{FS.Write, Raise | 'e}";
+  t.ok
+    (String.contains? `chip chip-quiet">Raise` html
+    && String.contains? `chip chip-row">| 'e` html))
+
+test "a module's own comment is its intro; a binding's doc is not" (fn t ->
+  t.eq
+    "About.\nMore."
+    (Stdlib.intro [
+      "uses {IO}",
+      "",
+      "import IO",
+      "",
+      "-- About.",
+      "-- More.",
+      "",
+      "-- Doc.",
+      "let x = 1"
+    ]))
+
+test "a doc directly above a binding is not an intro" (fn t ->
+  t.eq "" (Stdlib.intro ["import IO", "", "-- Doc.", "let x = 1"]))

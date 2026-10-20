@@ -1,0 +1,106 @@
+-- A Markdown document taken apart at its headings.
+--
+-- The reference is one file, and the site is many pages. A page is one `##`
+-- section, and the standard library's module pages are the `###` sections
+-- under "Current standard library". Every split is fence-aware: a `#` line
+-- inside a code block is a comment in the code, not a heading.
+
+let HTML = import ./html
+import List
+import Regex
+import String
+
+-- One section: its heading as written, the anchor that heading has, and
+-- the Markdown below it up to the next heading of the same level.
+type Section(title: String, id: String, body: String)
+
+let _fence? line = String.starts_with? "```" (String.trim_left line)
+
+-- The text a heading shows, without the Markdown around code in it.
+let plain title = String.replace "`" "" title
+
+type Split(fenced: Bool, title: Option String, lines: List String, done: List Section)
+
+-- The sections at one heading level, in order. What comes before the first
+-- heading belongs to no section and is dropped.
+let split level source =
+  let marker = String.repeat level "#" ++ " ";
+  let close st =
+    match st with
+    | Split(title = Some t, lines, done) -> Section(title = t, id = HTML.slug t, body = String.join "\n" (List.reverse lines)) :: done
+    | Split(done) -> done
+  in
+  let step st line = (
+    let Split(fenced, lines) = st;
+    match line with
+    | _ if _fence? line -> Split(st, fenced = !fenced, lines = line :: lines)
+    | _ if !fenced && String.starts_with? marker line -> (
+      let title =
+        String.trim (String.slice (String.length marker) (String.length line) line);
+      Split(fenced = false, title = Some title, lines = [], done = close st)
+    )
+    | _ -> Split(st, lines = line :: lines)
+  )
+  in
+  let start = Split(fenced = false, title = None, lines = [], done = []);
+  source |> String.lines |> List.fold_left step start |> close |> List.reverse
+
+-- The text before the first heading of a level.
+let preamble level source =
+  let marker = String.repeat level "#" ++ " ";
+  source
+  |> String.lines
+  |> List.take_while (fn l -> !(String.starts_with? marker l))
+  |> String.join "\n"
+
+-- Every heading in a body, from `##` down, as (level, title), in order.
+let headings source =
+  let step (fenced, found) line =
+    match line with
+    | _ if _fence? line -> (!fenced, found)
+    | _ if !fenced -> (
+      match Regex.capture r/^(#{2,6}) +(.*)$/ line with
+      | Some [_, hashes, title] -> (
+        false,
+        (String.length hashes, String.trim title) :: found
+      )
+      | _ -> (false, found)
+    )
+    | _ -> (fenced, found)
+  in
+  let (_, found) = source |> String.lines |> List.fold_left step (false, []);
+  List.reverse found
+
+-- A body's headings moved up by `n` levels, so a `###` under a page's own
+-- title becomes the page's `##`.
+let promote n source =
+  let step (fenced, out) line =
+    match line with
+    | _ if _fence? line -> (!fenced, line :: out)
+    | _ if !fenced && Regex.match? r/^#{2,6} / line -> (
+      false,
+      String.slice n (String.length line) line :: out
+    )
+    | _ -> (fenced, line :: out)
+  in
+  let (_, out) = source |> String.lines |> List.fold_left step (false, []);
+  out |> List.reverse |> String.join "\n"
+
+-- A body with every fenced block that is only signatures taken out. A
+-- module's own page lists its signatures from `wand d`, so the copy in the
+-- reference would say it twice.
+let without_signatures source =
+  let signature? line =
+    String.trim line == "" || Regex.match? r/^\s*[a-z_][A-Za-z0-9_]*[!?]?\s+:/ line;
+  let step (block, out) line =
+    match block with
+    | Some held if _fence? line -> (
+      let body = List.drop 1 (List.reverse held);
+      if List.all? signature? body then (None, out) else (None, line :: held ++ out)
+    )
+    | Some held -> (Some (line :: held), out)
+    | None if _fence? line -> (Some [line], out)
+    | None -> (None, line :: out)
+  in
+  let (_, out) = source |> String.lines |> List.fold_left step (None, []);
+  out |> List.reverse |> String.join "\n"

@@ -1,0 +1,77 @@
+-- wand source as HTML, with a class on each token that has a color.
+--
+-- This is a reader's highlighting, not a parser. It looks at one token at a
+-- time and never at what came before, so it can be wrong about a `/` that
+-- divides. It is right about what a reader looks for first: comments,
+-- strings, commands, keywords, types and the domain literals.
+
+let HTML = import ./html
+import List
+import Regex
+import String
+
+-- One token per match, and every byte is in a match: the last alternative
+-- takes a single byte, so joining the matches gives back the source.
+let _token =
+  r/--[^\n]*|"(\\.|[^"\\])*"|`[^`]*`|\$[?*]?\([^)\n]*\)|https?:\/\/[^\s)"]+|[A-Za-z_][A-Za-z0-9_]*[!?]?|~?\.{0,2}\/[A-Za-z0-9_.\/*-]*[A-Za-z0-9_*]|\*\*?\.[A-Za-z0-9]+|:[0-9]+|[0-9]+(\.[0-9]+)*(ms|min|s|h|d|MB|KB|GB|TB|B)?|\s+|./
+
+let keywords = [
+  "and",
+  "as",
+  "do",
+  "else",
+  "end",
+  "ensures",
+  "fn",
+  "for",
+  "handle",
+  "if",
+  "implement",
+  "import",
+  "in",
+  "interface",
+  "let",
+  "match",
+  "or",
+  "requires",
+  "return",
+  "then",
+  "try",
+  "type",
+  "unless",
+  "uses",
+  "when",
+  "with"
+]
+
+-- The class a token is drawn with, or None for plain text.
+let kind token =
+  match token with
+  | _ if String.starts_with? "--" token -> Some "c"
+  | _ if String.starts_with? `"` token || String.starts_with? "`" token -> Some "s"
+  | _ if String.starts_with? "$" token && String.length token > 1 -> Some "x"
+  | _ if List.contains? token keywords -> Some "k"
+  | "true" | "false" -> Some "l"
+  | _ if Regex.match? r/^[A-Z]/ token -> Some "t"
+  | _ if Regex.match? r/^([0-9]|https?:|~?\.{0,2}\/[^\s]|\*|:[0-9])/ token -> Some "l"
+  | _ -> None
+
+let _span token =
+  match kind token with
+  | Some k -> `<span class="%{k}">%{HTML.escape token}</span>`
+  | None -> HTML.escape token
+
+-- A block of wand source as highlighted HTML, to go inside a `<pre>`.
+let code source = Regex.match_all _token source |> List.map _span |> String.join ""
+
+-- A terminal session: a line that starts with `$ ` is a command, and the
+-- rest is what it printed.
+let console source =
+  let line l =
+    match l with
+    | _ if String.starts_with? "$ " l -> `<span class="p">$ </span>%{HTML.escape (String.slice 2 (String.length l) l)}`
+    | _ if String.starts_with? "Error:" l -> `<span class="x">%{HTML.escape l}</span>`
+    | _ if String.starts_with? "warning:" l -> `<span class="k">%{HTML.escape l}</span>`
+    | _ -> `<span class="o">%{HTML.escape l}</span>`
+  in
+  String.lines source |> List.map line |> String.join "\n"

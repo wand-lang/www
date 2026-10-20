@@ -1,0 +1,47 @@
+-- A file's manifest: the `uses` line it opens with, and its labels as chips.
+
+let HTML = import ./html
+import List
+import Regex
+import String
+
+-- The labels in a `uses` line, split at the commas between them and not at
+-- the ones inside `Net(a, b)`.
+let labels inner =
+  let step (depth, current, done) byte =
+    match byte with
+    | "(" -> (depth + 1, current ++ byte, done)
+    | ")" -> (depth - 1, current ++ byte, done)
+    | "," if depth == 0 -> (depth, "", String.trim current :: done)
+    | _ -> (depth, current ++ byte, done)
+  in
+  let (_, last, done) = List.fold_left step (0, "", []) (String.bytes inner);
+  String.trim last :: done |> List.reverse |> List.filter (fn l -> l != "")
+
+-- The labels a file's first line declares, or none.
+let of_lines lines =
+  match lines with
+  | [first :: _] -> (
+    match Regex.capture r/^uses \{(.*)\}\s*$/ first with
+    | Some [_, inner] -> labels inner
+    | _ -> []
+  )
+  | [] -> []
+
+-- One label as a chip. A `Shell` label has the coral edge that commands
+-- have in code, and `Raise` is drawn apart, since it is control flow and
+-- never part of a manifest.
+let chip label =
+  let extra =
+    match label with
+    | "Raise" -> " chip-quiet"
+    | _ if String.starts_with? "Shell" label -> " chip-shell"
+    | _ -> ""
+  in
+  `<span class="chip%{extra}">%{HTML.escape label}</span>`
+
+-- A manifest as chips, or one quiet chip saying there is none.
+let chips uses =
+  match uses with
+  | [] -> `<span class="chip chip-quiet">pure</span>`
+  | _ -> uses |> List.map chip |> String.join ""

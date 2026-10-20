@@ -1,0 +1,252 @@
+uses {FS.Read, IO}
+
+-- The examples page: the ports from bash, and the first steps.
+--
+-- A port opens with a comment that says what it does, the bash it
+-- replaces, and what that bash gets wrong. The page reads all three from
+-- the file, so a port says the same thing here as in the repository. Which
+-- port is shown in full, and the task each one is filed under, are this
+-- site's own, in data/examples.toml.
+
+import FS
+import IO
+import List
+import Option
+import Path
+import Regex
+import String
+import TOML
+
+let HTML = import ./html
+let Highlight = import ./highlight
+let Manifest = import ./manifest
+let Markdown = import ./markdown
+let {Page} = import ./layout
+
+type Start(path: String, blurb: String)
+
+type Category(name: String, ports: List String)
+
+type Plan(featured: String, start: List Start, category: List Category)
+
+-- One port, as its file describes it.
+type Ported(
+  name: String,
+  category: String,
+  uses: List String,
+  title: String,
+  bash: List String,
+  notes: List String,
+  source: String
+)
+
+let tree = "https://github.com/wand-lang/wand/tree/main/examples"
+
+let blob = "https://github.com/wand-lang/wand/blob/main/examples"
+
+let _comment? line = String.starts_with? "--" line
+
+let _uncomment line = Regex.replace r/^-- ?/ "" line
+
+-- The opening comment's paragraphs, after the manifest and the imports.
+let _header lines =
+  let header? line =
+    String.trim line == ""
+    || String.starts_with? "uses " line
+    || String.starts_with? "import " line;
+  lines
+  |> List.drop_while header?
+  |> List.take_while _comment?
+  |> List.map _uncomment
+  |> String.join "\n"
+  |> Regex.split r/\n\s*\n/
+  |> List.filter (fn p -> String.trim p != "")
+
+-- The bash a port replaces: the paragraph that starts `bash:`, its later
+-- lines lined up under its first.
+let _bash paragraph =
+  match String.lines paragraph with
+  | [first :: more] -> (
+    let command = String.trim_left (String.slice 5 (String.length first) first);
+    let column = String.length first - String.length command;
+    let under l =
+      if String.length l > column then String.slice column (String.length l) l
+      else String.trim l;
+    command :: List.map under more
+  )
+  | [] -> []
+
+let _bash? paragraph = String.starts_with? "bash:" paragraph
+
+-- A port's source without its opening comment, which the page shows as
+-- prose beside it.
+let code_only source =
+  let header? line =
+    String.trim line == ""
+    || String.starts_with? "uses " line
+    || String.starts_with? "import " line;
+  let lines = String.lines source;
+  let head = List.take_while header? lines;
+  let rest = List.drop (List.length head) lines;
+  let comment = List.take_while _comment? rest;
+  let body =
+    rest |> List.drop (List.length comment) |> List.drop_while (fn l -> String.trim l == "");
+  String.join "\n" (head ++ body)
+
+let _port! src category name =
+  let file = Path.join src (Path.of_string "examples/ports/%{name}.wand");
+  let source = FS.read_file! file;
+  let lines = String.lines source;
+  let paragraphs = _header lines;
+  let title =
+    match paragraphs with
+    | [first :: _] -> String.join " " (String.lines first)
+    | [] -> name
+  in
+  let bash = paragraphs |> List.find _bash? |> Option.map _bash |> Option.default [];
+  let notes = paragraphs |> List.drop 1 |> List.filter (fn p -> !(_bash? p));
+  Ported(
+    name = name,
+    category = category,
+    uses = Manifest.of_lines lines,
+    title = title,
+    bash = bash,
+    notes = notes,
+    source = source
+  )
+
+-- Every port in examples/ports/, filed by the plan. A port the plan does
+-- not name is filed under "Other", and the build says so.
+let ports! src plan = (
+  let Plan(category) = plan;
+  let on_disk =
+    FS.list_dir! (Path.join src ./examples/ports)
+    |> List.map (fn p -> Path.to_string (Path.basename p))
+    |> List.filter (fn n -> String.ends_with? ".wand" n)
+    |> List.map (fn n -> String.slice 0 (String.length n - 5) n)
+    |> List.sort;
+  let named = List.flat_map (fn (c: Category) -> c.ports) category;
+  let missing = List.filter (fn n -> !(List.contains? n on_disk)) named;
+  List.each (fn n -> IO.println_err "data/examples.toml: no port named %{n}") missing;
+  let other = List.filter (fn n -> !(List.contains? n named)) on_disk;
+  List.each
+    (fn n -> IO.println_err "data/examples.toml: %{n} is in no category; it goes under Other")
+    other;
+  let filed =
+    category
+    |> List.flat_map (fn (c: Category) ->
+      c.ports
+      |> List.filter (fn n -> List.contains? n on_disk)
+      |> List.map (fn n -> _port! src c.name n));
+  filed ++ List.map (_port! src "Other") other
+)
+
+let plan! () =
+  match TOML.decode Plan.decoder (TOML.read_file! ./data/examples.toml) with
+  | Ok p -> p
+  | Error why -> (
+    IO.println_err "data/examples.toml: %{why}";
+    Plan(featured = "", start = [], category = [])
+  )
+
+let _prose text = Markdown.inline (fn h -> h) (String.join " " (String.lines text))
+
+let _featured (port: Ported) =
+  let notes = port.notes;
+  let first =
+    match notes with
+    | [n :: _] -> "<p>%{_prose n}</p>"
+    | [] -> ""
+  in
+  let rest =
+    notes |> List.drop 1 |> List.map (fn n -> "<p>%{_prose n}</p>") |> String.join "\n";
+  let why =
+    if rest == "" then ""
+    else "<div class=\"card\"><span class=\"label\">Why it is shaped this way</span>\n%{rest}</div>";
+  `
+<section class="featured" aria-labelledby="featured-h">
+<div class="featured-head">
+<h2 id="featured-h" class="h2">%{HTML.escape (Regex.replace r/\.$/ "" port.title)}</h2>
+<a href="%{blob}/ports/%{port.name}.wand">ports/%{port.name}.wand</a>
+</div>
+<div class="featured-body">
+<div class="featured-side">
+<div class="card">
+<span class="label">Bash</span>
+<pre class="bash">%{HTML.escape (String.join "\n" port.bash)}</pre>
+%{first}
+</div>
+%{why}
+</div>
+<div class="codebox featured-code">
+<div class="codebox-bar"><span><strong>WAND</strong>&nbsp;&nbsp;%{port.name}.wand</span><button type="button" class="copy" data-copy>Copy</button></div>
+<pre><code>%{Highlight.code (String.trim_right (code_only port.source))}</code></pre>
+</div>
+</div>
+</section>`
+
+let _start (s: Start) =
+  let href =
+    if String.ends_with? "/" s.path then "%{tree}/%{s.path}" else "%{blob}/%{s.path}";
+  `<a class="card start-card" href="%{href}"><span class="mono">%{HTML.escape s.path}</span><span>%{HTML.escape s.blurb}</span></a>`
+
+let _port_card (port: Ported) =
+  let more =
+    match List.length port.bash with
+    | 0 | 1 -> ""
+    | 2 -> " · +1 more line"
+    | n -> " · +%{n - 1} more lines"
+  in
+  let first = port.bash |> List.head |> Option.default "";
+  let chips = port.uses |> List.map Manifest.chip |> String.join "";
+  `<a class="card port-card" href="%{blob}/ports/%{port.name}.wand" data-category="%{HTML.escape port.category}">
+<span class="port-top"><span class="port-name">%{port.name}</span><span class="port-cat">%{HTML.escape port.category}</span></span>
+<span class="port-desc">%{HTML.escape port.title}</span>
+<span class="port-bash"><span class="label">BASH%{more}</span><code>%{HTML.escape first}</code></span>
+<span class="chips">%{chips}</span>
+</a>`
+
+let page plan ports =
+  let Plan(featured, start) = plan;
+  let shown =
+    match List.find (fn (p: Ported) -> p.name == featured) ports with
+    | Some p -> _featured p
+    | None -> ""
+  in
+  let categories = ports |> List.map (fn (p: Ported) -> p.category) |> List.unique;
+  let pill c =
+    let pressed = if c == "All" then "true" else "false";
+    `<button type="button" class="pill" data-filter="%{HTML.escape c}" aria-pressed="%{pressed}">%{HTML.escape c}</button>`;
+  let pills = "All" :: categories |> List.map pill |> String.join "\n";
+  let count = List.length ports;
+  let body = `
+<div class="wrap page">
+<div class="page-head-text">
+<span class="eyebrow">examples/ports · %{count} scripts</span>
+<h1 class="title">Examples</h1>
+<p class="lead">Bash scripts, ported to wand. Each one opens with the bash it replaces, and says what that bash gets wrong.</p>
+</div>
+%{shown}
+<section class="group" aria-labelledby="start-h">
+<div class="section-head"><h2 id="start-h" class="h2">First steps</h2><p class="muted">Short files, one idea each.</p></div>
+<div class="grid-tight">
+%{start |> List.map _start |> String.join "\n"}
+</div>
+</section>
+<section class="group" aria-labelledby="ports-h">
+<div class="section-head"><h2 id="ports-h" class="h2">From bash</h2><p class="muted">Every port, with the bash it replaces and the manifest it declares.</p></div>
+<div class="pills" role="group" aria-label="Filter by task" data-filters="category">
+%{pills}
+</div>
+<div class="grid-wide">
+%{ports |> List.map _port_card |> String.join "\n"}
+</div>
+</section>
+</div>`;
+  Page(
+    title = "Examples",
+    description = "Bash scripts ported to wand, each with the bash it replaces.",
+    path = "examples/",
+    section = "examples",
+    body = body
+  )

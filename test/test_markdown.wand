@@ -1,0 +1,43 @@
+let {test, group} = import Test
+import String
+
+let Markdown = import ../lib/markdown
+
+-- Every href unchanged, for the tests that are not about links.
+let same href = href
+
+let render source = Markdown.render same source
+
+group "blocks" (fn () -> [
+  test "a heading takes the anchor GitHub gives it" (fn t ->
+    t.eq
+      `<h2 id="a-string-is-bytes">A <code>String</code> is bytes</h2>`
+      (render "## A `String` is bytes")),
+  test "lines of one paragraph stay one paragraph" (fn t ->
+    t.eq "<p>one\ntwo</p>\n<p>three</p>" (render "one\ntwo\n\nthree")),
+  test "a fence is not read as Markdown" (fn t ->
+    t.ok (String.contains? "# not a heading" (render "```sh\n# not a heading\n```"))),
+  test "a table drops the rule under its header" (fn t ->
+    let html = render "| a | b |\n|---|---|\n| 1 | x \\| y |";
+    t.ok
+      (String.contains? "<th>a</th><th>b</th>" html && String.contains? "<td>x | y</td>" html)),
+  test "a list item that is one paragraph has no <p>" (fn t ->
+    t.eq "<ul>\n<li>one</li>\n<li>two</li>\n</ul>" (render "- one\n- two")),
+  test "an item keeps the fence indented under it" (fn t ->
+    let html = render "- **x.** y\n\n  ```\n  let a = 1\n    b\n  ```\n";
+    t.ok (String.contains? `<pre class="code">` html && String.contains? "\n  b" html)),
+  test "a quote is a callout" (fn t ->
+    t.ok (String.starts_with? `<aside class="callout"><p>` (render "> **Note.** this")))
+])
+
+group "inline" (fn () -> [
+  test "code is escaped and never formatted" (fn t ->
+    t.eq "<code>a &lt;b&gt; *c*</code>" (Markdown.inline same "`a <b> *c*`")),
+  test "double backticks hold a backtick" (fn t ->
+    t.eq "<code>a`b</code>" (Markdown.inline same "``a`b``")),
+  test "bold and italic" (fn t ->
+    t.eq "<strong>a</strong> and <em>b</em>" (Markdown.inline same "**a** and *b*")),
+  test "a lone star is text" (fn t -> t.eq "2 * 3" (Markdown.inline same "2 * 3")),
+  test "a link's href goes through the page's linker" (fn t ->
+    t.eq `<a href="/x/#y">y</a>` (Markdown.inline (fn h -> "/x/" ++ h) "[y](#y)"))
+])

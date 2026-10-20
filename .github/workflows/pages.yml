@@ -1,0 +1,65 @@
+name: Pages
+
+# Builds wand-lang.org from the latest wand release and publishes it.
+#
+# The binary and the sources come from the same release: setup-wand installs
+# the newest one and says which it is, and the checkout below takes that
+# tag. The build refuses a binary and a checkout that disagree, because the
+# library pages would then document one and describe the other.
+#
+# A release of wand shows up at the next scheduled run, or at once with
+# "Run workflow".
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: wand
+        uses: wand-lang/setup-wand@v1
+
+      - uses: actions/checkout@v4
+        with:
+          repository: wand-lang/wand
+          ref: v${{ steps.wand.outputs.version }}
+          path: wand
+
+      - name: Test
+        run: wand s test
+
+      - name: Build
+        run: wand build.wand --src wand --out _site
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

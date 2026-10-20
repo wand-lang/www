@@ -1,0 +1,220 @@
+-- Markdown as HTML: the part of Markdown that the wand reference uses.
+--
+-- Headings, paragraphs, fenced code, tables, lists, block quotes, and inline
+-- code, bold, italic and links. HTML in the source is shown as text, never
+-- passed through, because the reference has none and a page should not
+-- change because a doc did.
+
+import List
+import Regex
+import String
+
+let Highlight = import ./highlight
+let HTML = import ./html
+
+type Lines = List String
+
+type Items = List Lines
+
+type Block =
+  Heading Int String
+  | Para String
+  | Fence String String
+  | Table Lines Items
+  | Bullets Items
+  | Numbered Items
+  | Quote Lines
+  | Rule
+
+let _blank? line = String.trim line == ""
+
+let _fence? line = String.starts_with? "```" (String.trim_left line)
+
+let _heading? line = Regex.match? r/^#{1,6} / line
+
+let _bullet? line = Regex.match? r/^[-*] / line
+
+let _number? line = Regex.match? r/^[0-9]+\. / line
+
+let _row? line = String.starts_with? "|" line
+
+let _quote? line = String.starts_with? ">" line
+
+let _opens_block? line =
+  _fence? line
+  || _heading? line
+  || _row? line
+  || _quote? line
+  || _bullet? line
+  || _number? line
+  || line == "---"
+
+-- What is left of a string with `n` bytes taken off each end.
+let _inside n text = String.slice n (String.length text - n) text
+
+let _unmark line = Regex.replace r/^([-*]|[0-9]+\.) / "" line
+
+-- An item's lines below its first are indented under its marker. The
+-- indent goes, and what is indented further keeps the rest of its indent.
+let _dedent width line =
+  match line with
+  | _ if String.starts_with? (String.repeat width " ") line ->
+    String.slice width (String.length line) line
+  | _ -> String.trim_left line
+
+-- The lines of one list, and the lines after it. An item runs on through
+-- the lines indented under it, and through a blank line when the line after
+-- the blank continues the list.
+let _list_region marker? lines =
+  let continues? rest =
+    match rest with
+    | [next :: _] -> marker? next || String.starts_with? "  " next
+    | [] -> false
+  in
+  let go acc rest =
+    match rest with
+    | [line :: more] if marker? line || String.starts_with? "  " line ->
+      go (line :: acc) more
+    | [line :: more] if _blank? line && continues? more -> go (line :: acc) more
+    | _ -> (List.reverse acc, rest)
+  in
+  go [] lines
+
+-- A list's lines as its items, each item's lines with the marker and the
+-- indent taken off.
+let _items marker? width region =
+  let step items line =
+    match items with
+    | _ if marker? line -> [_unmark line] :: items
+    | [item :: earlier] -> (_dedent width line :: item) :: earlier
+    | [] -> [[_dedent width line]]
+  in
+  List.fold_left step [] region |> List.map List.reverse |> List.reverse
+
+-- A table row's cells. A `\|` is a bar inside a cell, not a cell boundary.
+let _cells line =
+  line
+  |> String.trim
+  |> Regex.replace r/^\|/ ""
+  |> Regex.replace r/\|$/ ""
+  |> String.replace "\\|" "<<bar>>"
+  |> String.split "|"
+  |> List.map (fn cell -> String.trim (String.replace "<<bar>>" "|" cell))
+
+let blocks lines =
+  let go acc rest =
+    match rest with
+    | [] -> List.reverse acc
+    | [line :: more] if _blank? line -> go acc more
+    | [line :: more] if _fence? line -> (
+      let lang = String.trim (String.replace "```" "" line);
+      let body = List.take_while (fn l -> !(_fence? l)) more;
+      let after = List.drop (List.length body + 1) more;
+      go (Fence lang (String.join "\n" body) :: acc) after
+    )
+    | [line :: more] if _heading? line -> (
+      match Regex.capture r/^(#+) +(.*)$/ line with
+      | Some [_, hashes, title] ->
+        go (Heading (String.length hashes) (String.trim title) :: acc) more
+      | _ -> go (Para line :: acc) more
+    )
+    | [line :: more] if line == "---" -> go (Rule :: acc) more
+    | [line :: more] if _row? line -> (
+      let rows = line :: List.take_while _row? more;
+      let after = List.drop (List.length rows - 1) more;
+      -- The row under the header is the rule that makes it a table.
+      let table =
+        match List.map _cells rows with
+        | [header :: rest] -> Table header (List.drop 1 rest)
+        | [] -> Rule
+      in
+      go (table :: acc) after
+    )
+    | [line :: more] if _quote? line -> (
+      let quoted = line :: List.take_while _quote? more;
+      let after = List.drop (List.length quoted - 1) more;
+      let inner = List.map (fn l -> Regex.replace r/^> ?/ "" l) quoted;
+      go (Quote inner :: acc) after
+    )
+    | [line :: _] if _bullet? line -> (
+      let (region, after) = _list_region _bullet? rest;
+      go (Bullets (_items _bullet? 2 region) :: acc) after
+    )
+    | [line :: _] if _number? line -> (
+      let (region, after) = _list_region _number? rest;
+      go (Numbered (_items _number? 3 region) :: acc) after
+    )
+    | [line :: more] -> (
+      let lines = line :: List.take_while (fn l -> !(_blank? l) && !(_opens_block? l)) more;
+      let after = List.drop (List.length lines - 1) more;
+      go (Para (String.join "\n" lines) :: acc) after
+    )
+  in
+  go [] lines
+
+let _inline_token =
+  r/``([^`]|`[^`])*``|`[^`]*`|\*\*([^*]|\*[^*])+\*\*|\*[^*\s]([^*]*[^*\s])?\*|\[[^\]]*\]\([^)]*\)|[^`*\[]+|./
+
+-- One paragraph's text as HTML. `link` rewrites each href.
+let inline link text =
+  let piece token =
+    match token with
+    | _ if String.starts_with? "``" token && String.length token >= 4 -> "<code>%{HTML.escape (String.trim (_inside 2 token))}</code>"
+    | _ if String.starts_with? "`" token && String.ends_with? "`" token && String.length token >= 2 -> "<code>%{HTML.escape (_inside 1 token)}</code>"
+    | _ if String.starts_with? "**" token && String.length token >= 5 -> "<strong>%{inline link (_inside 2 token)}</strong>"
+    | _ if String.starts_with? "*" token && String.length token >= 3 -> "<em>%{inline link (_inside 1 token)}</em>"
+    | _ if String.starts_with? "[" token -> (
+      match Regex.capture r/^\[([^\]]*)\]\(([^)]*)\)$/ token with
+      | Some [_, label, href] -> `<a href="%{HTML.escape (link href)}">%{inline link label}</a>`
+      | _ -> HTML.escape token
+    )
+    | _ -> HTML.escape token
+  in
+  Regex.match_all _inline_token text |> List.map piece |> String.join ""
+
+-- A fenced block, highlighted by what it holds. The reference marks wand as
+-- `ocaml`, which is the nearest language GitHub can color.
+let fence lang body =
+  let inner =
+    match lang with
+    | "" | "ocaml" | "wand" -> Highlight.code body
+    | "console" -> Highlight.console body
+    | _ -> HTML.escape body
+  in
+  `<pre class="code"><code>%{inner}</code></pre>`
+
+let _table link header rows =
+  let cell tag text = "<%{tag}>%{inline link text}</%{tag}>";
+  let row tag cells = "<tr>" ++ String.join "" (List.map (cell tag) cells) ++ "</tr>";
+  let head = row "th" header;
+  let body = rows |> List.map (row "td") |> String.join "\n";
+  "<div class=\"table\"><table>\n<thead>%{head}</thead>\n<tbody>\n%{body}\n</tbody>\n</table></div>"
+
+-- Markdown source as HTML. `link` rewrites each href, which is how a page
+-- points the reference's own `#anchor` links at the pages that hold them.
+let render link source =
+  -- An item that is one paragraph is written without the `<p>`, so a list
+  -- of short items stays a tight list.
+  let item lines =
+    let tight = !(List.any? _blank? lines) && !(List.any? _opens_block? lines);
+    let text = String.join "\n" lines;
+    let inner = if tight then inline link text else render link text;
+    "<li>%{inner}</li>";
+  let list items = items |> List.map item |> String.join "\n";
+  let one block =
+    match block with
+    | Heading level title -> `<h%{level} id="%{HTML.slug title}">%{inline link title}</h%{level}>`
+    | Para text -> "<p>%{inline link text}</p>"
+    | Fence lang body -> fence lang body
+    | Table header rows -> _table link header rows
+    | Bullets items -> "<ul>\n%{list items}\n</ul>"
+    | Numbered items -> "<ol>\n%{list items}\n</ol>"
+    | Quote lines -> `<aside class="callout">%{render link (String.join "\n" lines)}</aside>`
+    | Rule -> ""
+  in
+  source
+  |> String.lines
+  |> blocks
+  |> List.map one
+  |> List.filter (fn h -> h != "")
+  |> String.join "\n"

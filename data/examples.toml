@@ -1,0 +1,108 @@
+# The examples page.
+
+# The port shown in full at the top of the page.
+featured = "disk-threshold"
+
+# First steps: files in examples/, in this order, with the line each card shows.
+
+[[start]]
+path = "hello.wand"
+blurb = "Two lines. The last expression is the result."
+
+[[start]]
+path = "shapes.wand"
+blurb = "A sum type, and matching on it."
+
+[[start]]
+path = "party.wand"
+blurb = "Importing names from another file, and running whoami."
+
+[[start]]
+path = "first-match.wand"
+blurb = "Stop reading a file at the first line that matches."
+
+[[start]]
+path = "log-summary.wand"
+blurb = "One pass over stdin, so the log never has to fit in memory."
+
+[[start]]
+path = "decode-tagged-union.wand"
+blurb = "A document that says which shape it is, in a field."
+
+[[start]]
+path = "repo-status.wand"
+blurb = "git status, with every count typed."
+
+[[start]]
+path = "packages/"
+blurb = "Two packages: an app and the library it depends on."
+
+# Each port in examples/ports/ by the task it does. The order of the groups
+# is the order of the filter, and the order inside a group is the order of
+# the cards. A port this file does not name is still shown, under "Other",
+# and the build says so.
+
+[[category]]
+name = "Logs and text"
+ports = [
+  "log-top-talkers",
+  "log-alert",
+  "error-rate",
+  "off-network-clients",
+  "sample-lines",
+  "csv-column-tally",
+  "build-warnings",
+]
+
+[[category]]
+name = "Files and disk"
+ports = [
+  "disk-threshold",
+  "large-files",
+  "empty-dirs",
+  "dir-budget",
+  "normalize-names",
+  "stale-artifacts",
+  "rotate-backups",
+  "checksum-manifest",
+  "verify-archives",
+  "batch-progress",
+]
+
+[[category]]
+name = "Releases and CI"
+ports = [
+  "ci-gate",
+  "latest-tag",
+  "release-check",
+  "stage-release",
+  "publish-config",
+  "single-run",
+]
+
+[[category]]
+name = "Network and services"
+ports = [
+  "http-retry",
+  "mirror-check",
+  "wait-for-port",
+  "health-server",
+  "line-server",
+]
+
+[[category]]
+name = "Kubernetes"
+ports = [
+  "pod-restarts",
+  "manifest-limits",
+  "secret-values",
+]
+
+[[category]]
+name = "Hosts and environment"
+ports = [
+  "env-check",
+  "provision-host",
+  "probe-args",
+  "bc-driver",
+]

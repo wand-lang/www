@@ -1,0 +1,78 @@
+# The reference's sidebar: each group, and the `##` sections of
+# docs/reference.md in it, by their headings as written. A section this
+# file does not name is still built, under "More", and the build says so.
+
+[[group]]
+name = "Start"
+sections = [
+  "Quick start",
+]
+
+[[group]]
+name = "The language"
+sections = [
+  "Primitives",
+  "Lexical domain types",
+  "Let bindings",
+  "Functions",
+  "If expressions",
+  "Pipeline",
+  "Sequencing",
+  "Pattern matching",
+  "Tuples",
+  "Lists",
+  "Maps",
+]
+
+[[group]]
+name = "Shell"
+sections = [
+  "Shell execution",
+  "Glob",
+  "Regular expressions",
+]
+
+[[group]]
+name = "Effects and safety"
+sections = [
+  "Errors and `try`",
+  "Effects",
+  "Manifests",
+  "Effect handlers",
+  "Resource brackets",
+]
+
+[[group]]
+name = "Data"
+sections = [
+  "Decoders",
+  "Contracts",
+]
+
+[[group]]
+name = "Types"
+sections = [
+  "Typed holes",
+  "Type definitions",
+  "Generics",
+  "Interfaces",
+  "Type inference",
+  "Type annotations",
+]
+
+[[group]]
+name = "Modules"
+sections = [
+  "Imports",
+  "Packages",
+]
+
+[[group]]
+name = "Tools"
+sections = [
+  "Testing",
+  "Comments",
+  "Style for scripts",
+  "REPL and CLI",
+  "Building",
+]

@@ -1,0 +1,44 @@
+import Regex
+import String
+
+let {test} = import Test
+
+let Highlight = import ../lib/highlight
+
+test "keywords, types and literals each have a class" (fn t ->
+  t.eq
+    `<span class="k">let</span> t = <span class="l">30s</span>`
+    (Highlight.code "let t = 30s"))
+
+test "a command is one token" (fn t ->
+  t.eq
+    `<span class="x">$(git status --porcelain)</span>`
+    (Highlight.code "$(git status --porcelain)"))
+
+test "a comment runs to the end of its line" (fn t ->
+  t.eq "<span class=\"c\">-- a &quot;b&quot;</span>\nx" (Highlight.code "-- a \"b\"\nx"))
+
+test "text is escaped" (fn t ->
+  t.eq
+    `a |&gt; b &lt; <span class="s">&quot;&amp;&quot;</span>`
+    (Highlight.code `a |> b < "&"`))
+
+-- The highlighted text with its markup taken off, which should be the
+-- source again.
+let unhighlight html =
+  html
+  |> Regex.replace_all r/<[^>]*>/ ""
+  |> String.replace "&lt;" "<"
+  |> String.replace "&gt;" ">"
+  |> String.replace "&quot;" `"`
+  |> String.replace "&amp;" "&"
+
+let sample = "uses {IO}\n\n-- é ü\nlet p = ./build/*.wand ~ % ^ @ # \\"
+
+test "nothing is lost: every byte is in a token" (fn t ->
+  t.eq sample (unhighlight (Highlight.code sample)))
+
+test "a console marks the command and the errors" (fn t ->
+  t.eq
+    "<span class=\"p\">$ </span>wand t x\n<span class=\"x\">Error: no</span>"
+    (Highlight.console "$ wand t x\nError: no"))

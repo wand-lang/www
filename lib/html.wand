@@ -1,0 +1,18 @@
+-- Small pieces of HTML: escaping text, and making anchors from headings.
+
+import Regex
+import String
+
+-- Text made safe to stand in an element or in a quoted attribute.
+let escape text =
+  text
+  |> String.replace "&" "&amp;"
+  |> String.replace "<" "&lt;"
+  |> String.replace ">" "&gt;"
+  |> String.replace `"` "&quot;"
+
+-- The anchor GitHub gives a heading: lower case, punctuation removed, and a
+-- dash for each space. The reference links to its own headings this way, so
+-- the site has to make the same anchors to keep those links working.
+let slug title =
+  title |> String.lower |> Regex.replace_all r/[^a-z0-9 _-]/ "" |> String.replace " " "-"

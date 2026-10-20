@@ -1,0 +1,170 @@
+#!/usr/bin/env wand
+uses {Clock, FS.Read, FS.Write, IO, Net.Listen, Proc, Shared, Shell(wand, which)}
+
+-- Build the site, and serve it on this machine to read it as it will be
+-- published.
+--
+--   ./serve.wand                          builds from ../wand, serves :8000
+--   ./serve.wand --src ../wand --port 9000
+--   ./serve.wand --watch                  and rebuilds when a source changes
+--
+-- Run it from the top of this repository, where build.wand finds data/
+-- and assets/. Ctrl-C stops it. Every answer tells the browser not to keep
+-- it, so a reload after a rebuild shows the new pages.
+--
+-- With --watch it looks once a second at what a build reads: the wand
+-- checkout's reference, VERSION and examples, this repository's lib/,
+-- data/ and assets/, and the wand binary itself. The library pages come
+-- from `wand d`, and the stdlib is built into the binary, so an edit to
+-- stdlib/*.wand shows up once `dune build` has made a new binary, and not
+-- before. There is no file event to wait on, so it compares when each file
+-- last changed, and its size, with what it saw the time before.
+
+import Args
+import Clock
+import FS
+import HTTP
+import IO
+import List
+import Map
+import Option
+import Par
+import Path
+import Proc
+import Shared
+import String
+
+type Options(src: Option Path, out: Option Path, port: Option Port, watch: Bool = false)
+
+let fail message = (IO.println_err "serve: %{message}"; Proc.exit 1)
+
+-- The media type a file is served as, by its extension. The site holds
+-- these and nothing else.
+let media_type path =
+  match Path.extension path with
+  | ".html" -> "text/html; charset=utf-8"
+  | ".css" -> "text/css; charset=utf-8"
+  | ".js" -> "text/javascript; charset=utf-8"
+  | ".json" -> "application/json"
+  | ".svg" -> "image/svg+xml"
+  | ".png" -> "image/png"
+  | _ -> "application/octet-stream"
+
+let answer status kind body =
+  HTTPResponse(
+    status = status,
+    headers = Map.from_list [("content-type", kind), ("cache-control", "no-store")],
+    body = body
+  )
+
+let not_found! out =
+  let page = Path.join out ./404.html;
+  let body = if FS.file? page then FS.read_file! page else "not found\n";
+  answer 404 "text/html; charset=utf-8" body
+
+-- A directory is served as its index.html. One asked for without its
+-- trailing slash is sent to the address with it first, since every link on
+-- a page is relative to where the page is.
+let respond! out (req: HTTP.Incoming) = (
+  let segments = HTTP.segments req;
+  let path = List.fold_left (fn p s -> Path.join p (Path.of_string s)) out segments;
+  match req.method with
+  | HTTP.GET | HTTP.HEAD -> (
+    match segments with
+    | _ if List.any? (fn s -> s == ".." || String.starts_with? "." s) segments ->
+      not_found! out
+    | _ if FS.dir? path && !(String.ends_with? "/" req.path) -> HTTPResponse(
+      status = 301,
+      headers = Map.from_list [("location", req.path ++ "/")],
+      body = ""
+    )
+    | _ if FS.dir? path && FS.file? (Path.join path ./index.html) ->
+      answer 200 (media_type ./index.html) (FS.read_file! (Path.join path ./index.html))
+    | _ if FS.file? path -> answer 200 (media_type path) (FS.read_file! path)
+    | _ -> not_found! out
+  )
+  | _ -> answer 405 "text/plain; charset=utf-8" "only GET and HEAD\n"
+)
+
+-- Each request on its own line, with what it was answered.
+let logged! out (req: HTTP.Incoming) = (
+  let response = respond! out req;
+  IO.println "%{response.status}  %{req.path}";
+  response
+)
+
+-- ── Watching ───────────────────────────────────────────────────────────
+
+-- What a build reads.
+let watched src binary =
+  [binary, Path.join src ./VERSION, Path.join src ./docs/reference.md, ./build.wand]
+  ++ FS.glob_in ./**/*.wand (Path.join src ./examples)
+  ++ FS.glob_in ./*.wand ./lib
+  ++ FS.glob_in ./*.toml ./data
+  ++ FS.glob_in ./* ./assets
+
+let _stamp path =
+  match (FS.mtime path, FS.size path) with
+  | (Ok changed, Ok size) -> "%{Path.to_string path} %{changed} %{size}"
+  | _ -> "%{Path.to_string path} gone"
+
+-- Every watched file with when it last changed and how big it is. A
+-- change to any of them changes this.
+let fingerprint src binary = watched src binary |> List.map _stamp |> String.join "\n"
+
+-- Build into `dir` in a process of its own, so an edit to build.wand or
+-- lib/ is in the build that follows it, and a build that fails is a
+-- failure of that process and not of this one.
+let build src dir =
+  let r = $?(wand build.wand --src %{src} --out %{dir});
+  if r.code == 0 then Ok (String.trim r.stdout)
+  else Error (String.trim (r.stderr ++ r.stdout))
+
+-- Build beside the served site and swap it in, so a page asked for during
+-- a rebuild comes from the last build rather than from half of this one.
+let rebuild! src out = (
+  let next = Path.of_string (Path.to_string out ++ ".next");
+  let old = Path.of_string (Path.to_string out ++ ".old");
+  match build src next with
+  | Ok _ -> (
+    (
+      ((if FS.dir? old then FS.delete_tree! old; FS.rename! out old); FS.rename! next out);
+      FS.delete_tree! old
+    );
+    IO.println "rebuilt; reload the page to see it"
+  )
+  | Error why ->
+    IO.println_err "serve: the build failed, so the last one is still served:\n%{why}"
+)
+
+-- Look once a second, and rebuild when something changed.
+let watch! src out =
+  let binary = Path.of_string $(which wand);
+  with Shared.make (fingerprint src binary) as seen ->
+  Clock.every 1s (fn () ->
+    let now = fingerprint src binary;
+    if now != Shared.get seen then (
+      let _ = Shared.update seen (fn _ -> now);
+      IO.println "a source changed; rebuilding";
+      rebuild! src out
+    ))
+
+let main! () = (
+  let o =
+    match Args.read Options.parser (Proc.args ()) with
+    | Ok o -> o
+    | Error why -> fail why
+  in
+  let src = Option.default ../wand o.src;
+  let out = Option.default ./_site o.out;
+  let port = Option.default :8000 o.port;
+  if !(FS.file? ./build.wand) then fail "run this from the top of the www repository";
+  match build src out with
+  | Ok said -> IO.println said
+  | Error why -> fail why;
+  let serve () = HTTP.serve! HTTP.Server(port = port) (logged! out);
+  IO.println "serving %{Path.to_string out} at http://localhost%{port}/ -- Ctrl-C stops it";
+  if o.watch then Par.all! [serve, fn () -> watch! src out] else serve ()
+)
+
+main! ()

@@ -1,0 +1,255 @@
+uses {FS.Read, FS.Write, Shell(wand)}
+
+-- The home page.
+--
+-- The code on it is checked by the build. The hero and the feature
+-- snippets are typechecked, and each terminal session is what `wand t`
+-- prints for it today, run when the site is built. A page that sells a
+-- checker should not show output the checker would not give.
+
+import FS
+import List
+import Path
+import Regex
+import String
+
+let HTML = import ./html
+let Highlight = import ./highlight
+let {Page} = import ./layout
+
+-- A backtick string cannot hold the two characters that open an
+-- interpolation, so the snippets write `@{` for them.
+let _wand text = String.replace "@{" "\%{" text
+
+let hero =
+  (_wand `
+uses {IO, Shell(git)}
+
+import IO
+import List
+import String
+
+let branch = $(git branch --show-current)
+let dirty  = $(git status --porcelain) |> String.lines |> List.length
+
+let status = if dirty > 0 then "@{dirty} file(s) changed" else "clean"
+
+IO.println "Branch:  @{branch}"
+IO.println "Status:  @{status}"`)
+
+-- A file `wand t` refuses, and why: it writes nothing and runs rsync, and
+-- its manifest says the opposite.
+let deploy =
+  (_wand `
+uses {FS.Write}
+
+let publish dir = $(rsync -a @{dir} host:/srv/site)
+`)
+
+let hole = "List.fold_left ? 0 [1, 2, 3]"
+
+let values = `
+import FS
+
+let timeout = 30s                -- Duration
+let log_dir = /var/log/app       -- Path
+let sources = *.wand             -- Glob
+let limit   = 100MB              -- Size
+
+FS.glob log_dir   -- type error: expected Glob, got Path`
+
+let failure =
+  (_wand `
+match FS.read_file ./config.toml with
+| Ok text -> text
+| Error why -> "using defaults (@{why})"
+
+FS.read_file! ./config.toml  -- raises; the name says so
+Env.get "HOME"               -- Option String, not ""`)
+
+let commands = `
+let branch = $(git branch --show-current)
+let dirty  = $(git status --porcelain)
+  |> String.lines
+  |> List.length`
+
+let handlers = `
+test "deploy pushes exactly once" (fn t ->
+  handle deploy () with
+  | Shell!run _ k -> k "ok")`
+
+-- What `wand t` prints for a file and for an expression, with the command
+-- that printed it. Asked of the binary the site is built with.
+let session! () =
+  with FS.temp_dir "www_" as dir -> (
+    let file = Path.join dir ./deploy.wand;
+    FS.write_file! file deploy;
+    let refused = $?(wand t %{file});
+    let hole_type = $?(wand t -e %{hole});
+    let tidy text =
+      text |> String.trim |> String.replace (Path.to_string file) "deploy.wand";
+    (
+      "$ wand t deploy.wand\n" ++ tidy refused.stderr ++ tidy refused.stdout,
+      "$ wand t -e '%{hole}'\n" ++ tidy hole_type.stdout ++ tidy hole_type.stderr
+    )
+  )
+
+type Feature(title: String, body: String, code: String)
+
+let _feature (f: Feature) = `
+<article class="card feature">
+<h3 class="h3">%{HTML.escape f.title}</h3>
+<p>%{f.body}</p>
+<pre class="code"><code>%{f.code}</code></pre>
+</article>`
+
+let _pillar (name, text) =
+  `<div class="pillar"><span class="pillar-name">%{name}</span><p>%{text}</p></div>`
+
+-- The hero's code, its first line marked: the manifest is the point.
+let _hero_html =
+  match String.split "\n" hero with
+  | [first :: rest] ->
+    `<span class="hi">%{Highlight.code first}</span>`
+    ++ Highlight.code (String.join "\n" rest)
+  | [] -> ""
+
+-- The first definition in a port, under the bash it replaces.
+let excerpt source bash =
+  let lines = String.lines source;
+  let from = List.drop_while (fn l -> !(String.starts_with? "let " l)) lines;
+  let block = List.take_while (fn l -> String.trim l != "") from;
+  "-- bash:  %{bash}\n\n" ++ String.join "\n" block
+
+let _copy_icon =
+  `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg>`
+
+-- The page. `ports` is how many ports there are, and `promo` the code the
+-- examples band shows.
+let page (refused, hole_session) ports promo =
+  let features =
+    [
+      Feature(
+        title = "Values carry their type",
+        body = "Paths, globs, durations, sizes, URLs, dates and addresses have literals of their own. Use one where another belongs, and you get a type error.",
+        code = Highlight.code values
+      ),
+      Feature(
+        title = "Failure is a value. Absence is a type",
+        body = `An operation that can fail returns a <code class="inline-code">Result</code> with the reason. Each fallible operation has a <code class="inline-code">!</code> sibling that raises instead, so the name shows the risk at the call site.`,
+        code = Highlight.code failure
+      ),
+      Feature(
+        title = "Shell commands, without the shell traps",
+        body = `wand quotes each value that goes into a command. A filename from the environment cannot become a second command. <code class="inline-code">$()</code> raises on a non-zero exit; <code class="inline-code">$?()</code> returns a result to examine.`,
+        code = Highlight.code commands
+      ),
+      Feature(
+        title = "The compiler writes the manifest for you",
+        body = "The error names the binding that introduced the effect, and gives the line to write, so you copy it instead of working it out.",
+        code = Highlight.console refused
+      ),
+      Feature(
+        title = "Ask the type system what fits",
+        body = `Write <code class="inline-code">?</code> where you do not know what belongs, then typecheck. wand answers with the type of the hole.`,
+        code = Highlight.console hole_session
+      ),
+      Feature(
+        title = "Test a deploy script that deploys nothing",
+        body = `<code class="inline-code">handle</code> intercepts the effects a script performs. Test the risky parts with the network disconnected.`,
+        code = Highlight.code handlers
+      )
+    ];
+  let pillars =
+    [
+      ("wand t", "Checks the manifest and the types. Runs nothing."),
+      (
+        "--dry-run",
+        "Prints what running the script would do: would write, would delete, would run."
+      ),
+      ("--trace", "Runs it, and reports each effect as it happens."),
+      ("handle", "Intercepts effects, so a deploy test deploys nothing.")
+    ];
+  let install =
+    "curl -fsSL https://raw.githubusercontent.com/wand-lang/wand/main/install.sh | sh";
+  let body = `
+<div class="wrap hero">
+<div class="hero-text">
+<span class="eyebrow">typed · ML-style · scripting</span>
+<h1 class="display">Scripts must declare what they touch.</h1>
+<p class="lead">wand is a typed, ML-style scripting language for human-AI collaboration. Use it for scripts that outgrew bash: deploys, CI glue, cron jobs, log processing.</p>
+<div class="actions">
+<a class="btn btn-primary" href="#install">Install wand</a>
+<a class="btn btn-secondary" href="reference/">Read the reference →</a>
+</div>
+</div>
+<div class="hero-code">
+<div class="codebox shadowed">
+<div class="codebox-bar"><span>repo-status.wand</span><span class="ok">wand t ✓</span></div>
+<pre><code>%{_hero_html}</code></pre>
+</div>
+<p class="small hero-note"><span class="eyebrow">line 1</span><span>The manifest. Declare too little and the file does not typecheck. Declare nothing and wand prints the line to add.</span></p>
+</div>
+</div>
+
+<section class="band" aria-labelledby="pillars-h">
+<h2 id="pillars-h" class="visually-hidden">What wand checks</h2>
+<div class="wrap pillars">
+%{pillars |> List.map _pillar |> String.join "\n"}
+</div>
+</section>
+
+<section class="wrap section" aria-labelledby="features-h">
+<div class="section-head">
+<h2 id="features-h" class="h1">A script cannot get around the declaration.</h2>
+<p>wand does not check that a script is correct. It checks that a script's own code cannot do what it did not declare.</p>
+</div>
+<div class="features">
+%{features |> List.map _feature |> String.join "\n"}
+</div>
+</section>
+
+<section id="install" class="wrap install" aria-labelledby="install-h">
+<div class="section-head">
+<h2 id="install-h" class="h1">Install</h2>
+<p>One binary and nothing else. Static Linux builds (x86_64, aarch64) and macOS builds (aarch64, x86_64), each with a <code class="inline-code">.sha256</code> and a GitHub build attestation.</p>
+</div>
+<div class="install-grid">
+<div class="install-col">
+<div class="install-head"><h3>On a laptop</h3><span class="small">No sudo. Installs to ~/.local/bin</span></div>
+<div class="cmd">
+<pre><code><span class="p">$ </span><span data-copy-text>%{HTML.escape install}</span></code></pre>
+<button type="button" class="copy-icon" aria-label="Copy install command" data-copy>%{_copy_icon}</button>
+</div>
+</div>
+<div class="install-col">
+<div class="install-head"><h3>In GitHub Actions</h3><a class="small" href="https://github.com/wand-lang/setup-wand">wand-lang/setup-wand</a></div>
+<pre class="code"><code><span class="t">- uses:</span> wand-lang/setup-wand@v1
+<span class="t">- run:</span> wand ci/deploy.wand</code></pre>
+</div>
+</div>
+</section>
+
+<section class="wrap promo-wrap" aria-labelledby="ex-h">
+<div class="promo">
+<div class="promo-text">
+<span class="tag">examples/ports</span>
+<h2 id="ex-h" class="h1">%{ports} bash scripts, ported</h2>
+<p>Each one opens with the bash it replaces, and says what that bash gets wrong.</p>
+<a class="btn btn-secondary" href="examples/">Browse the examples →</a>
+</div>
+<pre class="code"><code>%{Highlight.code promo}</code></pre>
+</div>
+</section>`;
+  Page(
+    title = "wand",
+    description = "wand is a typed, ML-style scripting language for human-AI collaboration. Scripts declare what they touch on their first line.",
+    path = "",
+    section = "",
+    body = body
+  )
+
+-- The snippets the page shows as wand, each typechecked. The ones that
+-- only make sense as a fragment, or that show a type error on purpose, are
+-- not here.
+let checked = [("repo-status.wand", hero)]

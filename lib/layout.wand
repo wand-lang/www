@@ -1,0 +1,97 @@
+-- The frame every page shares: the head, the header with its navigation,
+-- and the footer.
+
+let HTML = import ./html
+import List
+import String
+
+-- What a page needs to be written out. `path` is where it lives under the
+-- site, as `stdlib/FS/`, and the page goes in an `index.html` there. Links
+-- between pages are relative, so the site works under any prefix.
+type Page(title: String, description: String, path: String, section: String, body: String)
+
+let repo = "https://github.com/wand-lang/wand"
+
+-- How to get from a page back to the top of the site.
+let root path =
+  let depth = path |> String.split "/" |> List.filter (fn s -> s != "") |> List.length;
+  String.repeat depth "../"
+
+let logo size =
+  `<svg width="%{size}" height="%{size}" viewBox="0 0 32 32" aria-hidden="true"><path d="M10 3 C6 3 7 8 7 11 C7 14 5 16 3 16 C5 16 7 18 7 21 C7 24 6 29 10 29" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><path d="M22 3 C26 3 25 8 25 11 C25 14 27 16 29 16 C27 16 25 18 25 21 C25 24 26 29 22 29" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><line x1="16" y1="4" x2="16" y2="18" stroke="currentColor" stroke-width="2.8" stroke-linecap="round"/><polygon points="16,20.9 17.12,23.96 20.37,24.08 17.81,26.09 18.7,29.22 16,27.4 13.3,29.22 14.19,26.09 11.63,24.08 14.88,23.96" fill="#E8A33D"/></svg>`
+
+let _github_icon =
+  `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 19c-4.3 1.4-4.3-2.5-6-3m12 5v-3.5c0-1 .1-1.4-.5-2 2.8-.3 5.5-1.4 5.5-6a4.6 4.6 0 0 0-1.3-3.2 4.2 4.2 0 0 0-.1-3.2s-1.1-.3-3.5 1.3a12.3 12.3 0 0 0-6.2 0C6.5 2.8 5.4 3.1 5.4 3.1a4.2 4.2 0 0 0-.1 3.2A4.6 4.6 0 0 0 4 9.5c0 4.6 2.7 5.7 5.5 6-.6.6-.6 1.2-.5 2V21"/></svg>`
+
+let _nav_link up current (section, label) =
+  let here = if section == current then ` aria-current="page"` else "";
+  `<a href="%{up}%{section}/"%{here}>%{label}</a>`
+
+let _header up current version =
+  let links =
+    [("reference", "Reference"), ("stdlib", "Standard library"), ("examples", "Examples")]
+    |> List.map (_nav_link up current)
+    |> String.join "\n";
+  `
+<header class="site-header">
+<nav class="wrap nav" aria-label="Main">
+<a class="brand" href="%{up}">%{logo 32}<span class="brand-word">wand</span><span class="visually-hidden"> home</span></a>
+<span class="version">v%{version}</span>
+<div class="nav-spacer"></div>
+<div class="nav-links">
+%{links}
+<a class="nav-github" href="%{repo}">%{_github_icon}GitHub</a>
+</div>
+</nav>
+</header>`
+
+let _footer up = `
+<footer class="site-footer">
+<div class="wrap footer">
+<div class="footer-brand">
+<span class="brand-word">{!} wand</span>
+<span class="footer-small">MIT License · © 2026 Mark Stahl</span>
+</div>
+<nav class="footer-links" aria-label="More">
+<a href="%{up}reference/">Reference</a>
+<a href="%{repo}/blob/main/CHANGELOG.md">Changelog</a>
+<a href="%{repo}/releases">Releases</a>
+<a href="%{repo}/blob/main/docs/llm-authoring.md">Writing wand with an LLM</a>
+<a href="https://github.com/wand-lang">github.com/wand-lang</a>
+</nav>
+</div>
+</footer>`
+
+-- A whole page, from the head to the footer, its links starting from `up`.
+let render_from up version page =
+  let Page(title, description, section, body) = page;
+  let full = if title == "wand" then title else "%{title} · wand";
+  `
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>%{HTML.escape full}</title>
+<meta name="description" content="%{HTML.escape description}">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="%{up}assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<link rel="stylesheet" href="%{up}assets/site.css">
+<script src="%{up}assets/site.js" defer></script>
+</head>
+<body data-root="%{up}">
+<a class="skip" href="#content">Skip to content</a>
+%{_header up section version}
+<main id="content">
+%{body}
+</main>
+%{_footer up}
+</body>
+</html>
+`
+
+-- A whole page, its links relative to where it is.
+let render version (page: Page) = render_from (root page.path) version page

@@ -1,0 +1,31 @@
+import List
+
+let {test} = import Test
+
+let Sections = import ../lib/sections
+
+let doc =
+  "intro\n\n## One\n\na\n\n```sh\n## not a heading\n```\n\n### Sub `x`\n\nb\n\n## Two\n\nc"
+
+test "a document splits at its headings, not at the ones in code" (fn t ->
+  t.eq
+    ["One", "Two"]
+    (List.map (fn (s: Sections.Section) -> s.title) (Sections.split 2 doc)))
+
+test "a section has the anchor GitHub gives its heading" (fn t ->
+  t.eq ["one", "two"] (List.map (fn (s: Sections.Section) -> s.id) (Sections.split 2 doc)))
+
+test "what comes before the first heading is the preamble" (fn t ->
+  t.eq "intro\n" (Sections.preamble 2 doc))
+
+test "headings come with their level, code skipped" (fn t ->
+  t.eq [(2, "One"), (3, "Sub `x`"), (2, "Two")] (Sections.headings doc))
+
+test "promoting moves headings up and leaves code alone" (fn t ->
+  t.eq "## Sub\n```\n### code\n```" (Sections.promote 1 "### Sub\n```\n### code\n```"))
+
+test "a block of signatures goes, and other code stays" (fn t ->
+  t.eq
+    "text\n```\nlet x = 1\n```"
+    (Sections.without_signatures
+      "text\n```\nread : Path -> String\nmap  : 'a -> 'b\n```\n```\nlet x = 1\n```"))
