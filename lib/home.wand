@@ -121,9 +121,6 @@ let excerpt source bash =
   let block = List.take_while (fn l -> String.trim l != "") from;
   "-- bash:  %{bash}\n\n" ++ String.join "\n" block
 
-let _copy_icon =
-  `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg>`
-
 -- The page. `ports` is how many ports there are, and `promo` the code the
 -- examples band shows.
 let page (refused, hole_session) ports promo =
@@ -217,10 +214,7 @@ let page (refused, hole_session) ports promo =
 <div class="install-grid">
 <div class="install-col">
 <div class="install-head"><h3>On a laptop</h3><span class="small">No sudo. Installs to ~/.local/bin</span></div>
-<div class="cmd">
-<pre><code><span class="p">$ </span><span data-copy-text>%{HTML.escape install}</span></code></pre>
-<button type="button" class="copy-icon" aria-label="Copy install command" data-copy>%{_copy_icon}</button>
-</div>
+%{HTML.command "Copy install command" install}
 </div>
 <div class="install-col">
 <div class="install-head"><h3>In GitHub Actions</h3><a class="small" href="https://github.com/wand-lang/setup-wand">wand-lang/setup-wand</a></div>

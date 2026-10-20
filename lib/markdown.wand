@@ -174,14 +174,23 @@ let inline link text =
 
 -- A fenced block, highlighted by what it holds. The reference marks wand as
 -- `ocaml`, which is the nearest language GitHub can color.
+-- A shell block of one command and no comment is a command to run, so it
+-- gets a button that copies it.
 let fence lang body =
-  let inner =
-    match lang with
-    | "" | "ocaml" | "wand" -> Highlight.code body
-    | "console" -> Highlight.console body
-    | _ -> HTML.escape body
-  in
-  `<pre class="code"><code>%{inner}</code></pre>`
+  let one_command =
+    (lang == "sh" || lang == "bash")
+    && !(String.contains? "\n" body)
+    && !(String.contains? "#" body);
+  if one_command then HTML.command "Copy command" body
+  else (
+    let inner =
+      match lang with
+      | "" | "ocaml" | "wand" -> Highlight.code body
+      | "console" -> Highlight.console body
+      | _ -> HTML.escape body
+    in
+    `<pre class="code"><code>%{inner}</code></pre>`
+  )
 
 let _table link header rows =
   let cell tag text = "<%{tag}>%{inline link text}</%{tag}>";

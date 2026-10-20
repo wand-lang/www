@@ -17,6 +17,15 @@ group "blocks" (fn () -> [
     t.eq "<p>one\ntwo</p>\n<p>three</p>" (render "one\ntwo\n\nthree")),
   test "a fence is not read as Markdown" (fn t ->
     t.ok (String.contains? "# not a heading" (render "```sh\n# not a heading\n```"))),
+  test "a shell block of one command can be copied" (fn t ->
+    let html = render "```sh\ncurl -fsSL https://x/install.sh | sh\n```";
+    t.ok
+      (String.contains? "data-copy-text>curl -fsSL https://x/install.sh | sh<" html
+      && String.contains? "data-copy>" html)),
+  test "a shell block of several commands, or with a comment, has no copy button" (fn t ->
+    t.ok
+      (!(String.contains? "data-copy" (render "```sh\nwand i\nwand t\n```"))
+      && !(String.contains? "data-copy" (render "```sh\nwand i   # a session\n```")))),
   test "a table drops the rule under its header" (fn t ->
     let html = render "| a | b |\n|---|---|\n| 1 | x \\| y |";
     t.ok
