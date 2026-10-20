@@ -19,7 +19,7 @@ import TOML
 let HTML = import ./html
 let Markdown = import ./markdown
 let Sections = import ./sections
-let {Page} = import ./layout
+let {Page, root} = import ./layout
 
 type Group(name: String, sections: List String)
 
@@ -35,9 +35,26 @@ let _library = "Current standard library"
 
 let _module_title? title = Regex.match? r/^`[A-Z][A-Za-z0-9]*`$/ title
 
+-- The `##` sections that are pages, in the reference's order.
+let _sections reference =
+  reference
+  |> Sections.split 2
+  |> List.filter (fn (s: Sections.Section) -> s.title != _contents && s.title != _library)
+
+-- The reference starts with its first section, so that section's page is
+-- `reference/` itself: a link to the reference goes straight to it.
+let _start reference =
+  match _sections reference with
+  | [s :: _] -> s.id
+  | [] -> ""
+
+-- Where a section's page lives under the site.
+let _path start id = if id == start then "reference/" else "reference/%{id}/"
+
 -- Every heading in the reference, by its anchor, with the page it is on.
 -- The first heading with an anchor keeps it, as on GitHub.
 let anchors reference =
+  let start = _start reference;
   let add map (anchor, target) =
     if Map.has? anchor map then map else Map.set anchor target map;
   let below page body =
@@ -54,7 +71,7 @@ let anchors reference =
     match s.title with
     | t if t == _contents -> []
     | t if t == _library -> (s.id, "stdlib/") :: List.flat_map module_pairs (Sections.split 3 s.body)
-    | _ -> (let page = "reference/%{s.id}/"; (s.id, page) :: below page s.body)
+    | _ -> (let page = _path start s.id; (s.id, page) :: below page s.body)
   in
   reference |> Sections.split 2 |> List.flat_map pairs |> List.fold_left add Map.empty
 
@@ -117,11 +134,12 @@ let _ordered groups pages =
     |> List.find (fn (s: Sections.Section) -> s.title == t)
     |> Option.map (fn s -> (group, s)))
 
-let _side groups current =
+-- The sidebar, its links starting from `up`.
+let _side start up groups current =
   let link title =
     let id = HTML.slug title;
     let here = if title == current then ` aria-current="page"` else "";
-    `<a href="../%{id}/"%{here}>%{Markdown.inline (fn h -> h) title}</a>`;
+    `<a href="%{up}%{_path start id}"%{here}>%{Markdown.inline (fn h -> h) title}</a>`;
   let group (g: Group) =
     "<div class=\"side-group\"><span class=\"group-label\">%{HTML.escape g.name}</span>\n%{g.sections |> List.map link |> String.join "\n"}</div>";
   `
@@ -138,23 +156,24 @@ let _side groups current =
 <summary class="side-toggle">Sections</summary>
 <div class="side-groups">
 %{groups |> List.map group |> String.join "\n"}
-<a class="side-more" href="../../stdlib/">Standard library →</a>
+<a class="side-more" href="%{up}stdlib/">Standard library →</a>
 </div>
 </details>
 </aside>`
 
-let _pager (before: Option (String, Sections.Section)) (after: Option (String, Sections.Section)) =
+let _pager start up (before: Option (String, Sections.Section)) (after: Option (String, Sections.Section)) =
   let one cls label (item: Option (String, Sections.Section)) =
     match item with
-    | Some (_, s) -> `<a class="%{cls}" href="../%{s.id}/"><span>%{label}</span><span>%{Markdown.inline (fn h -> h) s.title}</span></a>`
+    | Some (_, s) -> `<a class="%{cls}" href="%{up}%{_path start s.id}"><span>%{label}</span><span>%{Markdown.inline (fn h -> h) s.title}</span></a>`
     | None -> ""
   in
   `<nav class="pager" aria-label="Next and previous">%{one "prev" "Previous" before}%{one "next" "Next" after}</nav>`
 
 -- One section's page.
-let _page anchors groups (before, (group, section), after) =
+let _page anchors start groups (before, (group, section), after) =
   let Sections.Section(title, id, body) = section;
-  let path = "reference/%{id}/";
+  let path = _path start id;
+  let up = root path;
   let link = linker anchors path;
   let toc =
     body
@@ -167,16 +186,16 @@ let _page anchors groups (before, (group, section), after) =
     else "<aside class=\"docs-toc\" aria-label=\"On this page\"><span class=\"group-label toc-label\">On this page</span><nav>\n%{toc}\n</nav></aside>";
   let page_body = `
 <div class="wrap-wide docs">
-%{_side groups title}
+%{_side start up groups title}
 <article class="docs-main narrow">
 <div class="doc-head">
-<nav class="crumbs" aria-label="Breadcrumb"><span><a href="../">Reference</a><span aria-hidden="true">/</span><span>%{HTML.escape group}</span></span><a class="edit" href="%{repo}/blob/main/docs/reference.md#%{id}">Edit on GitHub</a></nav>
+<nav class="crumbs" aria-label="Breadcrumb"><span><a href="%{up}reference/">Reference</a><span aria-hidden="true">/</span><span>%{HTML.escape group}</span></span><a class="edit" href="%{repo}/blob/main/docs/reference.md#%{id}">Edit on GitHub</a></nav>
 <h1 class="title">%{Markdown.inline link title}</h1>
 </div>
 <div class="prose">
 %{Markdown.render link (Sections.promote 1 body)}
 </div>
-%{_pager before after}
+%{_pager start up before after}
 </article>
 %{toc_part}
 </div>`;
@@ -188,71 +207,24 @@ let _page anchors groups (before, (group, section), after) =
     body = page_body
   )
 
--- The reference's front page: what it covers, and every section by group.
-let _index anchors groups (ordered: List (String, Sections.Section)) intro =
-  let link = linker anchors "reference/";
-  let card (g: Group) =
-    let items =
-      g.sections
-      |> List.map (fn t -> `<li><a href="%{HTML.slug t}/">%{Markdown.inline link t}</a></li>`)
-      |> String.join "\n";
-    "<section class=\"card\"><h2 class=\"group-label\">%{HTML.escape g.name}</h2><ul class=\"ref-list\">\n%{items}\n</ul></section>";
-  let first =
-    match ordered with
-    | [(_, s) :: _] -> "<a class=\"btn btn-primary\" href=\"%{s.id}/\">Start with %{Sections.plain s.title} →</a>"
-    | [] -> ""
-  in
-  let body = `
-<div class="wrap page">
-<div class="page-head-text">
-<span class="eyebrow">docs/reference.md</span>
-<h1 class="title">Language reference</h1>
-<div class="lead">%{Markdown.render link intro}</div>
-<div class="actions">%{first}<a class="btn btn-secondary" href="../stdlib/">Standard library</a></div>
-</div>
-<div class="grid ref-groups">
-%{groups |> List.map card |> String.join "\n"}
-</div>
-</div>`;
-  Page(
-    title = "Reference",
-    description = "The complete wand language: syntax, types, the standard library, and the tools.",
-    path = "reference/",
-    section = "reference",
-    body = body
-  )
-
 -- Every reference page.
 let pages! anchors reference =
-  let pages =
-    reference
-    |> Sections.split 2
-    |> List.filter (fn (s: Sections.Section) -> s.title != _contents && s.title != _library);
+  let pages = _sections reference;
+  let start = _start reference;
   let groups = sidebar! pages;
   let ordered = _ordered groups pages;
   let at i = List.get i ordered;
-  let intro =
-    reference
-    |> Sections.preamble 2
-    |> String.lines
-    |> List.filter (fn l -> !(String.starts_with? "# " l) && l != "---")
-    |> String.join "\n";
-  let each =
-    ordered
-    |> List.indexed
-    |> List.map (fn (i, item) -> _page anchors groups (at (i - 1), item, at (i + 1)));
-  _index anchors groups ordered intro :: each
+  ordered
+  |> List.indexed
+  |> List.map (fn (i, item) -> _page anchors start groups (at (i - 1), item, at (i + 1)))
 
 -- What the site's search finds in the reference: each page, and each
 -- heading on it.
 let search_entries reference =
-  let pages =
-    reference
-    |> Sections.split 2
-    |> List.filter (fn (s: Sections.Section) -> s.title != _contents && s.title != _library);
-  pages
+  let start = _start reference;
+  _sections reference
   |> List.flat_map (fn (s: Sections.Section) ->
-    let page = "reference/%{s.id}/";
+    let page = _path start s.id;
     (Sections.plain s.title, page, "reference") :: (s.body
     |> Sections.headings
     |> List.map (fn (_, t) -> (

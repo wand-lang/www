@@ -557,9 +557,3 @@ tbody th { font-weight: 500; color: var(--muted); }
 .example .result { display: block; margin-top: 6px; padding-top: 6px; border-top: 1px dashed rgba(246, 243, 236, 0.14); }
 .guide { display: flex; flex-direction: column; gap: 16px; max-width: 800px; }
 
-/* The reference's front page. */
-.ref-groups { align-items: start; }
-.ref-groups .card { padding: 24px; gap: 12px; }
-.ref-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
-.ref-list a { display: block; padding: 5px 0; color: var(--ink); text-decoration: none; }
-.ref-list a:hover { color: var(--link); text-decoration: underline; }
