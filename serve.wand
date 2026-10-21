@@ -53,7 +53,7 @@ let media_type path =
 let answer status kind body =
   HTTPResponse(
     status = status,
-    headers = Map.from_list [("content-type", kind), ("cache-control", "no-store")],
+    headers = Map.of_list [("content-type", kind), ("cache-control", "no-store")],
     body = body
   )
 
@@ -75,7 +75,7 @@ let respond! out (req: HTTP.Incoming) = (
       not_found! out
     | _ if FS.dir? path && !(String.ends_with? "/" req.path) -> HTTPResponse(
       status = 301,
-      headers = Map.from_list [("location", req.path ++ "/")],
+      headers = Map.of_list [("location", req.path ++ "/")],
       body = ""
     )
     | _ if FS.dir? path && FS.file? (Path.join path ./index.html) ->

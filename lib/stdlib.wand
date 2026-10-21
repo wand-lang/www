@@ -109,7 +109,7 @@ let _fns! module lines =
   in
   let fn_of result =
     match result with
-    | Ok (Described(name, ty, doc)) -> (
+    | Ok Described(name, ty, doc) -> (
       let short = _short module name;
       Some Fn(
         name = name,

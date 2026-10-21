@@ -76,7 +76,7 @@ let write_page! out version (page: Layout.Page) = (
 let search_json entries =
   let entry (title, url, kind) =
     JSON.of_map
-      (Map.from_list [
+      (Map.of_list [
         ("t", JSON.of_string title),
         ("u", JSON.of_string url),
         ("k", JSON.of_string kind)
