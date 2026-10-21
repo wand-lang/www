@@ -136,12 +136,7 @@ blurb = "Base64, both alphabets."
 [[module]]
 name = "Hash"
 group = "Data formats"
-blurb = "Hash a string, or a file."
-
-[[module]]
-name = "Digest"
-group = "Data formats"
-blurb = "A digest, and the algorithm that made it."
+blurb = "Hash a string or a file, and read or write a hash as hex or base64."
 
 [[module]]
 name = "Int"
