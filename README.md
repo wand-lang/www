@@ -11,7 +11,7 @@ copied by hand:
 | Reference | `docs/reference.md`, one page per `##` section |
 | Standard library | `wand d --json`, the manifest and opening comment of each file in `stdlib/`, and the module's section of the reference |
 | Examples | the opening comment of each file in `examples/ports/` |
-| Home | the copy in `lib/home.wand`; its terminal sessions are what `wand t` prints when the site is built |
+| `/` | a redirect to the reference |
 
 `data/` holds what the sources do not say: the group and one-line
 description of each module, the reference's sidebar groups, and the task
@@ -55,6 +55,6 @@ publishes to GitHub Pages on every push to `main`, once a day, and on
 
 - `build.wand` — reads the options, checks the versions agree, and writes every page.
 - `serve.wand` — builds, then serves `_site/` on this machine with `HTTP.serve!`; `--watch` polls the sources and rebuilds.
-- `lib/` — `markdown`, `highlight`, `sections` and `html` are pure; `stdlib`, `reference`, `examples` and `home` each make one part of the site; `layout` is the frame every page shares.
+- `lib/` — `markdown`, `highlight`, `sections` and `html` are pure; `stdlib`, `reference` and `examples` each make one part of the site; `layout` is the frame every page shares.
 - `assets/` — `site.css` (the design's tokens, light and dark), `site.js` (search, filters, tabs, copy), the icon.
 - `test/` — `wand s` tests for the pure modules.

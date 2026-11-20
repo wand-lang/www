@@ -175,7 +175,6 @@ img, svg { display: block; }
   font-family: var(--mono); font-size: 13px; letter-spacing: 0.04em;
   color: var(--link); font-weight: 500;
 }
-.display { font-size: 60px; line-height: 1.04; letter-spacing: -0.035em; font-weight: 800; }
 .title { font-size: 48px; line-height: 1.05; letter-spacing: -0.035em; font-weight: 800; }
 .title-mono { font-family: var(--mono); font-size: 48px; line-height: 1.05; letter-spacing: -0.03em; font-weight: 700; }
 .h1 { font-size: 40px; line-height: 1.1; letter-spacing: -0.03em; font-weight: 800; }
@@ -194,22 +193,12 @@ img, svg { display: block; }
 }
 
 @media (max-width: 720px) {
-  .display { font-size: 42px; }
   .title, .title-mono { font-size: 38px; }
   .h1 { font-size: 32px; }
   .h2 { font-size: 24px; }
 }
 
 /* ── Controls ─────────────────────────────────────────────────────────── */
-
-.btn {
-  display: inline-flex; align-items: center; justify-content: center; min-height: 44px;
-  font: 600 16px/1.2 var(--sans); padding: 13px 22px; border-radius: 10px;
-  text-decoration: none; cursor: pointer;
-}
-.btn-primary { background: var(--amber); color: var(--navy); border: 1px solid var(--amber); }
-.btn-secondary { color: var(--ink); border: 1px solid var(--border-strong); background: transparent; }
-.btn:hover { text-decoration: none; filter: brightness(1.04); }
 
 .pills { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .pill {
@@ -286,7 +275,6 @@ pre.code, .codebox pre {
   padding: 6px 8px; margin: -6px -8px; border-radius: 6px; cursor: pointer; min-height: 32px;
 }
 .copy:hover { background: rgba(246, 243, 236, 0.08); }
-.shadowed { box-shadow: var(--shadow); }
 
 .c { color: var(--hl-cmt); }
 .s { color: var(--hl-str); }
@@ -296,7 +284,6 @@ pre.code, .codebox pre {
 .l { color: var(--hl-lit); }
 .p { color: var(--hl-cmt); }
 .o { color: var(--hl-out); }
-.hi { display: block; background: rgba(232, 163, 61, 0.12); margin: 0 -22px; padding: 0 22px; }
 
 .inline-code, .prose :not(pre) > code, .doc :not(pre) > code {
   font-size: 0.88em; padding: 1px 5px; border-radius: 4px; background: var(--sunken);
@@ -324,35 +311,10 @@ a.card:hover { border-color: var(--border-strong); }
 }
 .callout-note { background: var(--sunken); }
 
-/* ── Home ─────────────────────────────────────────────────────────────── */
+/* ── Commands ─────────────────────────────────────────────────────────── */
 
-.hero { display: flex; flex-wrap: wrap; gap: 56px; align-items: center; padding-top: 88px; padding-bottom: 72px; }
-.hero-text { flex: 1 1 460px; min-width: 0; display: flex; flex-direction: column; gap: 24px; }
-.hero-code { flex: 1 1 520px; min-width: 0; display: flex; flex-direction: column; gap: 14px; }
-.hero-note { display: flex; gap: 10px; align-items: baseline; }
-.hero-note .eyebrow { font-size: 12px; font-weight: 700; white-space: nowrap; }
-.actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 8px; }
-
-.band { border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); background: var(--surface); }
-.pillars { display: flex; flex-wrap: wrap; gap: 32px; padding-top: 40px; padding-bottom: 40px; }
-.pillar { flex: 1 1 240px; display: flex; flex-direction: column; gap: 6px; }
-.pillar-name { font: 700 14px var(--mono); }
-.pillar p { font-size: 15px; line-height: 1.5; color: var(--muted); }
-
-.section { padding-top: 96px; padding-bottom: 40px; display: flex; flex-direction: column; gap: 48px; }
 .section-head { display: flex; flex-direction: column; gap: 12px; max-width: 40em; }
 .section-head p { font-size: 18px; line-height: 1.55; color: var(--muted); }
-
-.features { display: flex; flex-wrap: wrap; gap: 24px; }
-.feature { flex: 1 1 480px; }
-.feature p { font-size: 15.5px; line-height: 1.6; color: var(--muted); }
-.feature pre.code { margin-top: auto; border-radius: 10px; font-size: 13px; line-height: 1.65; }
-
-.install { padding-top: 72px; padding-bottom: 72px; display: flex; flex-direction: column; gap: 32px; }
-.install-grid { display: flex; flex-wrap: wrap; gap: 24px; }
-.install-col { flex: 1 1 480px; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
-.install-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 4px 12px; }
-.install-head h3 { font-size: 17px; font-weight: 700; }
 .cmd {
   background: var(--code); border: 1px solid var(--code-border); border-radius: 10px;
   padding: 10px 10px 10px 18px; display: flex; align-items: center; gap: 14px;
@@ -363,18 +325,6 @@ a.card:hover { border-color: var(--border-strong); }
   background: transparent; color: var(--hl-base); display: flex; align-items: center; justify-content: center; cursor: pointer;
 }
 .cmd .copy-icon:hover { background: rgba(246, 243, 236, 0.08); }
-
-.promo-wrap { padding-top: 24px; padding-bottom: 96px; }
-.promo {
-  background: var(--navy); color: #F6F3EC; border-radius: 20px; padding: 48px;
-  display: flex; flex-wrap: wrap; gap: 40px; align-items: center; border: 1px solid var(--code-border);
-}
-.promo-text { flex: 1 1 400px; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
-.promo-text p { font-size: 17px; line-height: 1.6; color: #C9CEDC; }
-.promo .tag { background: rgba(232, 163, 61, 0.16); color: var(--amber); }
-.promo .btn-secondary { color: #F6F3EC; border-color: rgba(246, 243, 236, 0.3); align-self: flex-start; font-size: 15px; padding: 12px 18px; }
-.promo pre.code { flex: 1 1 420px; min-width: 0; background: #0A1222; border: 0; padding: 20px 22px; }
-@media (max-width: 720px) { .promo { padding: 28px 20px; } }
 
 /* ── Index pages: stdlib and examples ─────────────────────────────────── */
 
